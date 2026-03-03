@@ -85,25 +85,35 @@ interface Cell {
   h: number
   shimmerPhase: number
   shimmerSpeed: number
+  row: number
+}
+
+interface Particle {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  size: number
+  alpha: number
 }
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
 }
 
-// Hermite smoothstep for smooth lens falloff
 function smoothstep(t: number) {
   return t * t * (3 - 2 * t)
 }
 
 const CANVAS_H = 520
 const LENS_RADIUS = 150
-const DISPLACE_STRENGTH = 40
+const DISPLACE_STRENGTH = 35
 const BASE_FONT = 10
 const MAX_FONT = 16
 const CELL_H = 26
 const CELL_PAD_X = 12
 const GAP = 5
+const PARTICLE_COUNT = 40
 
 export function UseCaseConstellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -114,14 +124,29 @@ export function UseCaseConstellation() {
   const fadeIn = useRef(0)
   const time = useRef(0)
 
-  // Smooth cursor
   const mouseRaw = useRef({ x: -9999, y: -9999 })
   const mouseSmooth = useRef({ x: -9999, y: -9999 })
   const mouseActive = useRef(false)
-  const hoverStrength = useRef(0) // 0..1 lerped for smooth appear/disappear
+  const hoverStrength = useRef(0)
 
-  // Precomputed cell layout
   const cells = useRef<Cell[]>([])
+  const particles = useRef<Particle[]>([])
+
+  // Init particles
+  useEffect(() => {
+    const p: Particle[] = []
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      p.push({
+        x: Math.random(),
+        y: Math.random(),
+        vx: (Math.random() - 0.5) * 0.0002,
+        vy: (Math.random() - 0.5) * 0.0002,
+        size: Math.random() * 1.2 + 0.4,
+        alpha: Math.random() * 0.15 + 0.03,
+      })
+    }
+    particles.current = p
+  }, [])
 
   useEffect(() => {
     const el = containerRef.current
@@ -133,7 +158,7 @@ export function UseCaseConstellation() {
     return () => ro.disconnect()
   }, [])
 
-  // Recompute cell layout when width changes
+  // Recompute cell layout
   useEffect(() => {
     if (dimensions.w === 0) return
     const w = dimensions.w
@@ -145,6 +170,7 @@ export function UseCaseConstellation() {
     const result: Cell[] = []
     let cx = 0
     let cy = 0
+    let row = 0
 
     for (const text of USE_CASES) {
       const textW = octx.measureText(text).width
@@ -153,6 +179,7 @@ export function UseCaseConstellation() {
       if (cx + cellW > w && cx > 0) {
         cx = 0
         cy += CELL_H + GAP
+        row++
       }
 
       result.push({
@@ -163,8 +190,16 @@ export function UseCaseConstellation() {
         h: CELL_H,
         shimmerPhase: Math.random() * Math.PI * 2,
         shimmerSpeed: 0.3 + Math.random() * 0.4,
+        row,
       })
       cx += cellW + GAP
+    }
+
+    // Alternate row offset for visual variety
+    for (const cell of result) {
+      if (cell.row % 2 === 1) {
+        cell.x += 14
+      }
     }
 
     // Center vertically
@@ -208,17 +243,15 @@ export function UseCaseConstellation() {
         return
       }
 
-      // Fade in
       if (visible.current && fadeIn.current < 1) {
         fadeIn.current = Math.min(1, fadeIn.current + 0.012)
       }
       time.current += 0.01
 
-      // Smooth hover strength
-      const hoverTarget = mouseActive.current ? 1 : 0
-      hoverStrength.current = lerp(hoverStrength.current, hoverTarget, 0.06)
+      // Smooth hover
+      hoverStrength.current = lerp(hoverStrength.current, mouseActive.current ? 1 : 0, 0.06)
 
-      // Smooth cursor position
+      // Smooth cursor
       const cLerp = mouseActive.current ? 0.1 : 0.03
       mouseSmooth.current.x = lerp(mouseSmooth.current.x, mouseRaw.current.x, cLerp)
       mouseSmooth.current.y = lerp(mouseSmooth.current.y, mouseRaw.current.y, cLerp)
@@ -237,11 +270,22 @@ export function UseCaseConstellation() {
       const mx = mouseSmooth.current.x
       const my = mouseSmooth.current.y
       const hs = hoverStrength.current
-      const isHovering = hs > 0.01
 
-      // Draw lens glow
-      if (isHovering && fadeIn.current > 0.2) {
-        // Outer glow
+      // Update & draw particles
+      for (const p of particles.current) {
+        p.x += p.vx
+        p.y += p.vy
+        if (p.x < 0 || p.x > 1) p.vx *= -1
+        if (p.y < 0 || p.y > 1) p.vy *= -1
+
+        ctx.beginPath()
+        ctx.arc(p.x * w, p.y * h, p.size, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha * fadeIn.current})`
+        ctx.fill()
+      }
+
+      // Lens glow
+      if (hs > 0.01 && fadeIn.current > 0.2) {
         const grad = ctx.createRadialGradient(mx, my, 0, mx, my, LENS_RADIUS * 1.3)
         grad.addColorStop(0, `rgba(56, 149, 255, ${0.07 * hs * fadeIn.current})`)
         grad.addColorStop(0.6, `rgba(56, 149, 255, ${0.02 * hs * fadeIn.current})`)
@@ -251,32 +295,33 @@ export function UseCaseConstellation() {
         ctx.arc(mx, my, LENS_RADIUS * 1.3, 0, Math.PI * 2)
         ctx.fill()
 
-        // Lens ring
+        // Ring
         ctx.beginPath()
         ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.08 * hs * fadeIn.current})`
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.07 * hs * fadeIn.current})`
         ctx.lineWidth = 1
         ctx.stroke()
       }
 
+      // Collect displaced positions for connections
+      const displaced: { x: number; y: number; influence: number }[] = []
+
       // Draw cells
-      for (const cell of cells.current) {
+      for (let i = 0; i < cells.current.length; i++) {
+        const cell = cells.current[i]
         const cellCx = cell.x + cell.w / 2
         const cellCy = cell.y + cell.h / 2
 
-        // Distance from cursor to cell center
         const dx = cellCx - mx
         const dy = cellCy - my
         const dist = Math.hypot(dx, dy)
 
-        // Lens influence (0 outside, 1 at center)
-        const rawT = isHovering ? Math.max(0, 1 - dist / LENS_RADIUS) : 0
+        const rawT = hs > 0.01 ? Math.max(0, 1 - dist / LENS_RADIUS) : 0
         const influence = smoothstep(rawT) * hs
 
-        // Font size scaling
         const fontSize = lerp(BASE_FONT, MAX_FONT, influence)
 
-        // Fisheye displacement — push items outward from cursor
+        // Fisheye displacement
         let drawX = cellCx
         let drawY = cellCy
         if (influence > 0.01 && dist > 1) {
@@ -291,16 +336,16 @@ export function UseCaseConstellation() {
         drawX += driftX
         drawY += driftY
 
-        // Shimmer — idle cells pulse subtly
-        const shimmer = Math.sin(time.current * cell.shimmerSpeed + cell.shimmerPhase) * 0.04 + 0.04
+        // Store for connections
+        displaced.push({ x: drawX, y: drawY, influence })
 
-        // Alpha
+        // Shimmer
+        const shimmer = Math.sin(time.current * cell.shimmerSpeed + cell.shimmerPhase) * 0.04 + 0.04
         const baseAlpha = 0.13 + shimmer
         const alpha = lerp(baseAlpha, 0.95, influence) * fadeIn.current
 
-        // Background pill when magnified
+        // Pill background
         if (influence > 0.08) {
-          // Measure magnified text width
           ctx.font = `500 ${fontSize}px system-ui, -apple-system, sans-serif`
           const tw = ctx.measureText(cell.text).width
           const pillW = tw + fontSize * 1.2
@@ -311,10 +356,7 @@ export function UseCaseConstellation() {
           ctx.roundRect(drawX - pillW / 2, drawY - pillH / 2, pillW, pillH, pillR)
           ctx.fillStyle = `rgba(22, 20, 18, ${influence * 0.85 * fadeIn.current})`
           ctx.fill()
-
-          // Border glow
-          const borderAlpha = influence * 0.2 * fadeIn.current
-          ctx.strokeStyle = `rgba(56, 149, 255, ${borderAlpha})`
+          ctx.strokeStyle = `rgba(56, 149, 255, ${influence * 0.18 * fadeIn.current})`
           ctx.lineWidth = 0.7
           ctx.stroke()
         }
@@ -324,13 +366,11 @@ export function UseCaseConstellation() {
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
-        // Color shifts toward blue accent when magnified
         if (influence > 0.3) {
           const blueT = (influence - 0.3) / 0.7
-          const r = Math.round(lerp(255, 140, blueT))
-          const g = Math.round(lerp(255, 200, blueT))
-          const b = Math.round(lerp(255, 255, blueT))
-          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
+          const r = Math.round(lerp(255, 160, blueT))
+          const g = Math.round(lerp(255, 210, blueT))
+          ctx.fillStyle = `rgba(${r}, ${g}, 255, ${alpha})`
         } else {
           ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
         }
@@ -338,19 +378,39 @@ export function UseCaseConstellation() {
         ctx.fillText(cell.text, drawX, drawY)
       }
 
-      // Draw cursor dot
-      if (isHovering && fadeIn.current > 0.2) {
-        // Outer ring
+      // Draw connections between nearby magnified cells
+      if (hs > 0.1) {
+        for (let i = 0; i < displaced.length; i++) {
+          if (displaced[i].influence < 0.2) continue
+          for (let j = i + 1; j < displaced.length; j++) {
+            if (displaced[j].influence < 0.2) continue
+            const a = displaced[i]
+            const b = displaced[j]
+            const d = Math.hypot(a.x - b.x, a.y - b.y)
+            if (d < 120) {
+              const connAlpha = (1 - d / 120) * Math.min(a.influence, b.influence) * 0.15 * fadeIn.current
+              ctx.beginPath()
+              ctx.moveTo(a.x, a.y)
+              ctx.lineTo(b.x, b.y)
+              ctx.strokeStyle = `rgba(56, 149, 255, ${connAlpha})`
+              ctx.lineWidth = 0.5
+              ctx.stroke()
+            }
+          }
+        }
+      }
+
+      // Cursor dot
+      if (hs > 0.01 && fadeIn.current > 0.2) {
         ctx.beginPath()
-        ctx.arc(mx, my, 6, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 * hs * fadeIn.current})`
+        ctx.arc(mx, my, 5, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 * hs * fadeIn.current})`
         ctx.lineWidth = 1.5
         ctx.stroke()
 
-        // Inner dot
         ctx.beginPath()
-        ctx.arc(mx, my, 2, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.8 * hs * fadeIn.current})`
+        ctx.arc(mx, my, 1.5, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.7 * hs * fadeIn.current})`
         ctx.fill()
       }
 
