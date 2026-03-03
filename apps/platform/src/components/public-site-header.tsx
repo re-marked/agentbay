@@ -62,9 +62,6 @@ export function PublicSiteHeader() {
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" asChild>
             <a href={`${MARKETPLACE_URL}/workspace/home`}>Workspace</a>
           </Button>
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" asChild>
-            <a href="#">Pricing</a>
-          </Button>
           <Button variant="ghost" size="sm" className="text-foreground font-medium" asChild>
             <Link href="/">For Devs</Link>
           </Button>

@@ -64,9 +64,6 @@ export function PublicSiteHeader() {
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" asChild>
             <Link href="/workspace/home">Workspace</Link>
           </Button>
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" asChild>
-            <Link href="/platform">For Devs</Link>
-          </Button>
         </div>
       </nav>
     </header>

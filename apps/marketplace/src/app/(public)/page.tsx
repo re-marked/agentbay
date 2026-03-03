@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Search, ArrowRight, ChevronDown, Circle, Triangle, Square } from 'lucide-react'
+import { Search, ArrowRight, ChevronDown } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { AuroraHero } from '@/components/aurora-hero'
 import { RotatingText } from '@/components/rotating-text'
@@ -11,27 +11,12 @@ import Lenis from 'lenis'
 import { SierpinskiLogo } from '@/components/sierpinski-logo'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { joinWaitlist } from '@/lib/waitlist/actions'
+import { ScrollSpotlightText } from '@/components/scroll-spotlight-text'
+import { AiAdoptionGrid } from '@/components/ai-adoption-grid'
 
-const isLocked = process.env.NEXT_PUBLIC_LAUNCH_LOCKDOWN !== 'false'
+const MISSION = 'AgentBay is on a mission to make high-quality AI agents simple, fast, and accessible for everyone.'
+const MISSION_ACCENT = [7, 8, 9, 15]
 
-const ROLES = [
-  {
-    icon: Circle,
-    title: 'The Researcher',
-    description: 'Reads everything so you don\'t have to. Summarizes papers, tracks trends, digs through data. Never skims, never forgets.',
-  },
-  {
-    icon: Triangle,
-    title: 'The Writer',
-    description: 'Writes in your voice. Blog posts, emails, reports, tweets. First drafts in minutes, polished versions in seconds.',
-  },
-  {
-    icon: Square,
-    title: 'The Analyst',
-    description: 'Watches your numbers while you sleep. Spots what\'s changing, explains why it matters, tells you what to do about it.',
-  },
-]
 
 /** Lenis smooth scroll bound to a specific wrapper element */
 function SmoothScrollInner({ wrapper }: { wrapper: HTMLElement }) {
@@ -60,178 +45,7 @@ function SmoothScrollInner({ wrapper }: { wrapper: HTMLElement }) {
   return null
 }
 
-function WaitlistForm() {
-  const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState('')
-  const [pending, startTransition] = useTransition()
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    startTransition(async () => {
-      const result = await joinWaitlist(formData)
-      if (result.error) {
-        setError(result.error)
-      } else {
-        setSubmitted(true)
-      }
-    })
-  }
-
-  if (submitted) {
-    return (
-      <motion.p
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-lg font-light tracking-lighter text-foreground"
-      >
-        You&apos;re on the list.
-      </motion.p>
-    )
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="flex w-full max-w-md flex-col items-center gap-3 sm:flex-row">
-      <div className="relative w-full flex-1">
-        <input
-          name="email"
-          type="email"
-          required
-          placeholder="you@example.com"
-          className="h-12 w-full rounded-xl border border-white/10 bg-card/60 px-4 text-base text-foreground backdrop-blur-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50 focus:bg-card/80"
-        />
-      </div>
-      <Button
-        type="submit"
-        disabled={pending}
-        className="h-12 shrink-0 rounded-xl px-6 text-base font-medium"
-      >
-        {pending ? 'Joining...' : 'Get early access'}
-      </Button>
-      {error && <p className="w-full text-center text-sm text-red-400">{error}</p>}
-    </form>
-  )
-}
-
 export default function LandingPage() {
-  if (!isLocked) {
-    return <UnlockedLandingPage />
-  }
-
-  const [viewport, setViewport] = useState<HTMLElement | null>(null)
-  const scrollAreaRef = useRef<HTMLDivElement>(null)
-
-  // Grab the Radix viewport element after mount
-  useEffect(() => {
-    if (scrollAreaRef.current) {
-      const el = scrollAreaRef.current.querySelector('[data-slot="scroll-area-viewport"]')
-      if (el) setViewport(el as HTMLElement)
-    }
-  }, [])
-
-  return (
-    <ScrollArea ref={scrollAreaRef} className="h-svh">
-      {viewport && <SmoothScrollInner wrapper={viewport} />}
-      <main className="w-full">
-        {/* ─── Section 1: Hero ─── */}
-        <section className="relative flex h-svh w-full flex-col items-center justify-center overflow-hidden px-6">
-          <div className="absolute inset-0 z-0">
-            <AuroraHero className="h-full w-full" />
-          </div>
-
-          <h1 className="relative z-10 mb-6 flex flex-wrap justify-center text-center text-5xl font-medium tracking-lightest sm:text-6xl">
-            <span>Personal Agents for</span>
-            <span className="ml-[0.25em] w-[220px] text-left">
-              <RotatingText />
-            </span>
-          </h1>
-          <p className="relative z-10 max-w-xl text-center text-lg text-secondary-foreground">
-            Every person is a corporation. You are the boss and dozens of AI agents work for you.
-            The real skill now becomes systems thinking, execution speed, and creativity.
-          </p>
-
-          {/* Scroll indicator */}
-          <motion.div
-            className="absolute bottom-8 z-10"
-            animate={{ y: [0, 8, 0] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <ChevronDown className="size-6 text-muted-foreground/50" />
-          </motion.div>
-        </section>
-
-        {/* ─── Section 2: The Shift ─── */}
-        <section className="flex w-full flex-col items-center justify-center px-6 py-32">
-          <ScrollReveal className="max-w-3xl text-center">
-            <h2 className="mb-6 text-4xl font-medium tracking-tight sm:text-5xl lg:text-6xl">
-              <span className="text-secondary-foreground">You used to need a company</span>
-              <br />
-              <span className="text-secondary-foreground">to have a team.</span>
-              <br />
-              <span className="mt-2 inline-block pb-1 bg-gradient-to-r from-gradient-from to-gradient-to bg-clip-text text-transparent">
-                Not anymore.
-              </span>
-            </h2>
-          </ScrollReveal>
-          <ScrollReveal delay={0.15} className="max-w-xl text-center">
-            <p className="text-lg leading-relaxed text-muted-foreground">
-              AI agents that research, write, analyze, and build — working alongside you, around the clock. What used to take ten people now takes one person and <span className="bg-gradient-to-r from-gradient-from to-gradient-to bg-clip-text text-transparent">the right agents.</span>
-            </p>
-          </ScrollReveal>
-        </section>
-
-        {/* ─── Section 3: Three Roles ─── */}
-        <section className="w-full px-6 py-2">
-          <ScrollReveal className="mx-auto mb-16 max-w-lg text-center">
-            <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">
-              Your first hires
-            </p>
-          </ScrollReveal>
-
-          <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-3">
-            {ROLES.map((role, i) => (
-              <ScrollReveal key={role.title} delay={i * 0.1}>
-                <div className="group relative overflow-hidden rounded-2xl p-[2px] transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:scale-[1.015]">
-                  {/* Rotating gradient — always visible at low opacity, brightens on hover */}
-                  <div className="animate-border-rotate absolute inset-0 opacity-[0.08] transition-opacity duration-700 group-hover:opacity-60" style={{ background: 'conic-gradient(from var(--border-angle, 0deg), hsl(var(--gradient-from)), hsl(var(--gradient-to)), hsl(var(--gradient-from)))' }} />
-                  <div className="relative rounded-[calc(var(--radius-2xl)-2px)] bg-[hsl(30_3%_13%)] p-8">
-                    <role.icon className="mb-5 size-5 text-muted-foreground" strokeWidth={1.5} />
-                    <h3 className="mb-3 text-lg font-medium text-foreground">{role.title}</h3>
-                    <p className="text-[15px] leading-relaxed text-muted-foreground">
-                      {role.description}
-                    </p>
-                  </div>
-                </div>
-              </ScrollReveal>
-            ))}
-          </div>
-        </section>
-
-        {/* ─── Section 4: Waitlist CTA ─── */}
-        <section className="flex w-full flex-col items-center px-6 pb-24 pt-16">
-          <ScrollReveal className="flex flex-col items-center gap-8 text-center">
-            <SierpinskiLogo className="size-10 text-foreground/80" />
-            <div>
-              <h2 className="mb-3 text-3xl font-medium tracking-tight sm:text-4xl">
-                AgentBay is coming.
-              </h2>
-              <p className="text-lg text-muted-foreground">
-                The place where you hire your first agentic team.
-              </p>
-            </div>
-            <WaitlistForm />
-            <p className="text-sm text-muted-foreground/60">
-              We&apos;ll let you know when it&apos;s ready. No spam, obviously.
-            </p>
-          </ScrollReveal>
-        </section>
-      </main>
-    </ScrollArea>
-  )
-}
-
-/** Unlocked landing page with search + CTA + manifesto + roles */
-function UnlockedLandingPage() {
   const [viewport, setViewport] = useState<HTMLElement | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -246,22 +60,24 @@ function UnlockedLandingPage() {
     <ScrollArea ref={scrollAreaRef} className="h-svh -mt-14">
       {viewport && <SmoothScrollInner wrapper={viewport} />}
       <main className="w-full">
-        {/* ─── Section 1: Hero ─── */}
+        {/* ─── Hero ─── */}
         <section className="relative flex h-svh w-full flex-col items-center justify-center overflow-hidden px-6">
           <div className="absolute inset-0 z-0">
             <AuroraHero className="h-full w-full" />
           </div>
 
-          <h1 className="relative z-10 mb-6 flex flex-wrap justify-center text-center text-5xl font-medium tracking-lightest sm:text-6xl">
+          <h1 className="relative z-10 mb-6 flex flex-wrap justify-center text-center text-5xl font-medium tracking-[-0.04em] sm:text-6xl">
             <span>Personal Agents for</span>
             <span className="ml-[0.25em] w-[220px] text-left">
               <RotatingText />
             </span>
           </h1>
-          <p className="relative z-10 mb-10 max-w-xl text-center text-lg text-secondary-foreground">
-            Every person is a corporation. You are the boss and dozens of AI agents work for you.
-            The real skill now becomes systems thinking, execution speed, and creativity.
-          </p>
+          <ScrollSpotlightText
+            text="Every person is a corporation. You are the boss and dozens of AI agents work for you. The real skill now becomes systems thinking, execution speed, and creativity."
+            immediate
+            initialDelay={0.3}
+            className="relative z-10 mb-10 max-w-xl text-center text-lg text-secondary-foreground"
+          />
 
           <div className="relative w-full max-w-2xl">
             <form action="/discover" className="relative z-10">
@@ -285,7 +101,6 @@ function UnlockedLandingPage() {
             </Button>
           </div>
 
-          {/* Scroll indicator */}
           <motion.div
             className="absolute bottom-8 z-10"
             animate={{ y: [0, 8, 0] }}
@@ -295,19 +110,28 @@ function UnlockedLandingPage() {
           </motion.div>
         </section>
 
-        {/* ─── Section 2: The Shift ─── */}
+        {/* ─── Mission ─── */}
+        <section className="flex w-full items-center justify-center px-6 py-16">
+          <ScrollSpotlightText
+            text={MISSION}
+            accentIndices={MISSION_ACCENT}
+            className="max-w-4xl text-center text-4xl font-medium leading-snug tracking-tight sm:text-5xl lg:text-6xl"
+          />
+        </section>
+
+        {/* ─── AI Adoption Grid ─── */}
+        <section className="w-full px-6 py-32">
+          <AiAdoptionGrid />
+        </section>
+
+        {/* ─── The Shift ─── */}
         <section className="flex w-full flex-col items-center justify-center px-6 py-32">
-          <ScrollReveal className="max-w-3xl text-center">
-            <h2 className="mb-6 text-4xl font-medium tracking-tight sm:text-5xl lg:text-6xl">
-              <span className="text-secondary-foreground">You used to need a company</span>
-              <br />
-              <span className="text-secondary-foreground">to have a team.</span>
-              <br />
-              <span className="mt-2 inline-block pb-1 bg-gradient-to-r from-gradient-from to-gradient-to bg-clip-text text-transparent">
-                Not anymore.
-              </span>
-            </h2>
-          </ScrollReveal>
+          <ScrollSpotlightText
+            text="You used to need a company to have a team. Not anymore."
+            accentIndices={[10, 11]}
+            as="h2"
+            className="mb-6 max-w-3xl text-center text-4xl font-medium tracking-tight sm:text-5xl lg:text-6xl"
+          />
           <ScrollReveal delay={0.15} className="max-w-xl text-center">
             <p className="text-lg leading-relaxed text-muted-foreground">
               AI agents that research, write, analyze, and build — working alongside you, around the clock. What used to take ten people now takes one person and <span className="bg-gradient-to-r from-gradient-from to-gradient-to bg-clip-text text-transparent">the right agents.</span>
@@ -315,40 +139,16 @@ function UnlockedLandingPage() {
           </ScrollReveal>
         </section>
 
-        {/* ─── Section 3: Three Roles ─── */}
-        <section className="w-full px-6 py-2">
-          <ScrollReveal className="mx-auto mb-16 max-w-lg text-center">
-            <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">
-              Your first hires
-            </p>
-          </ScrollReveal>
-
-          <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-3">
-            {ROLES.map((role, i) => (
-              <ScrollReveal key={role.title} delay={i * 0.1}>
-                <div className="group relative overflow-hidden rounded-2xl p-[2px] transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:scale-[1.015]">
-                  <div className="animate-border-rotate absolute inset-0 opacity-[0.08] transition-opacity duration-700 group-hover:opacity-60" style={{ background: 'conic-gradient(from var(--border-angle, 0deg), hsl(var(--gradient-from)), hsl(var(--gradient-to)), hsl(var(--gradient-from)))' }} />
-                  <div className="relative rounded-[calc(var(--radius-2xl)-2px)] bg-[hsl(30_3%_13%)] p-8">
-                    <role.icon className="mb-5 size-5 text-muted-foreground" strokeWidth={1.5} />
-                    <h3 className="mb-3 text-lg font-medium text-foreground">{role.title}</h3>
-                    <p className="text-[15px] leading-relaxed text-muted-foreground">
-                      {role.description}
-                    </p>
-                  </div>
-                </div>
-              </ScrollReveal>
-            ))}
-          </div>
-        </section>
-
-        {/* ─── Section 4: CTA ─── */}
+        {/* ─── CTA ─── */}
         <section className="flex w-full flex-col items-center px-6 pb-24 pt-16">
           <ScrollReveal className="flex flex-col items-center gap-8 text-center">
             <SierpinskiLogo className="size-10 text-foreground/80" />
             <div>
-              <h2 className="mb-3 text-3xl font-medium tracking-tight sm:text-4xl">
-                Your team is waiting.
-              </h2>
+              <ScrollSpotlightText
+                text="Your team is waiting."
+                as="h2"
+                className="mb-3 text-3xl font-medium tracking-tight sm:text-4xl"
+              />
               <p className="text-lg text-muted-foreground">
                 Hire your first agent and start building.
               </p>
