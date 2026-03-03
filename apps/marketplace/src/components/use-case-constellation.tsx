@@ -88,14 +88,6 @@ interface Cell {
   row: number
 }
 
-interface Particle {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  size: number
-  alpha: number
-}
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -113,7 +105,6 @@ const MAX_FONT = 16
 const CELL_H = 26
 const CELL_PAD_X = 12
 const GAP = 5
-const PARTICLE_COUNT = 40
 
 export function UseCaseConstellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -130,23 +121,6 @@ export function UseCaseConstellation() {
   const hoverStrength = useRef(0)
 
   const cells = useRef<Cell[]>([])
-  const particles = useRef<Particle[]>([])
-
-  // Init particles
-  useEffect(() => {
-    const p: Particle[] = []
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      p.push({
-        x: Math.random(),
-        y: Math.random(),
-        vx: (Math.random() - 0.5) * 0.0002,
-        vy: (Math.random() - 0.5) * 0.0002,
-        size: Math.random() * 1.2 + 0.4,
-        alpha: Math.random() * 0.15 + 0.03,
-      })
-    }
-    particles.current = p
-  }, [])
 
   useEffect(() => {
     const el = containerRef.current
@@ -271,25 +245,12 @@ export function UseCaseConstellation() {
       const my = mouseSmooth.current.y
       const hs = hoverStrength.current
 
-      // Update & draw particles
-      for (const p of particles.current) {
-        p.x += p.vx
-        p.y += p.vy
-        if (p.x < 0 || p.x > 1) p.vx *= -1
-        if (p.y < 0 || p.y > 1) p.vy *= -1
-
-        ctx.beginPath()
-        ctx.arc(p.x * w, p.y * h, p.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha * fadeIn.current})`
-        ctx.fill()
-      }
-
-      // Lens glow
+      // Lens glow (white only)
       if (hs > 0.01 && fadeIn.current > 0.2) {
         const grad = ctx.createRadialGradient(mx, my, 0, mx, my, LENS_RADIUS * 1.3)
-        grad.addColorStop(0, `rgba(56, 149, 255, ${0.07 * hs * fadeIn.current})`)
-        grad.addColorStop(0.6, `rgba(56, 149, 255, ${0.02 * hs * fadeIn.current})`)
-        grad.addColorStop(1, 'rgba(56, 149, 255, 0)')
+        grad.addColorStop(0, `rgba(255, 255, 255, ${0.04 * hs * fadeIn.current})`)
+        grad.addColorStop(0.6, `rgba(255, 255, 255, ${0.015 * hs * fadeIn.current})`)
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
         ctx.fillStyle = grad
         ctx.beginPath()
         ctx.arc(mx, my, LENS_RADIUS * 1.3, 0, Math.PI * 2)
@@ -298,7 +259,7 @@ export function UseCaseConstellation() {
         // Ring
         ctx.beginPath()
         ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.07 * hs * fadeIn.current})`
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.06 * hs * fadeIn.current})`
         ctx.lineWidth = 1
         ctx.stroke()
       }
@@ -356,7 +317,7 @@ export function UseCaseConstellation() {
           ctx.roundRect(drawX - pillW / 2, drawY - pillH / 2, pillW, pillH, pillR)
           ctx.fillStyle = `rgba(22, 20, 18, ${influence * 0.85 * fadeIn.current})`
           ctx.fill()
-          ctx.strokeStyle = `rgba(56, 149, 255, ${influence * 0.18 * fadeIn.current})`
+          ctx.strokeStyle = `rgba(255, 255, 255, ${influence * 0.12 * fadeIn.current})`
           ctx.lineWidth = 0.7
           ctx.stroke()
         }
@@ -366,14 +327,7 @@ export function UseCaseConstellation() {
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
-        if (influence > 0.3) {
-          const blueT = (influence - 0.3) / 0.7
-          const r = Math.round(lerp(255, 160, blueT))
-          const g = Math.round(lerp(255, 210, blueT))
-          ctx.fillStyle = `rgba(${r}, ${g}, 255, ${alpha})`
-        } else {
-          ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
-        }
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
 
         ctx.fillText(cell.text, drawX, drawY)
       }
@@ -388,11 +342,11 @@ export function UseCaseConstellation() {
             const b = displaced[j]
             const d = Math.hypot(a.x - b.x, a.y - b.y)
             if (d < 120) {
-              const connAlpha = (1 - d / 120) * Math.min(a.influence, b.influence) * 0.15 * fadeIn.current
+              const connAlpha = (1 - d / 120) * Math.min(a.influence, b.influence) * 0.12 * fadeIn.current
               ctx.beginPath()
               ctx.moveTo(a.x, a.y)
               ctx.lineTo(b.x, b.y)
-              ctx.strokeStyle = `rgba(56, 149, 255, ${connAlpha})`
+              ctx.strokeStyle = `rgba(255, 255, 255, ${connAlpha})`
               ctx.lineWidth = 0.5
               ctx.stroke()
             }
