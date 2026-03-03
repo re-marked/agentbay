@@ -227,11 +227,11 @@ export function AiAdoptionGrid() {
 
   return (
     <div ref={containerRef} className="relative w-full max-w-5xl mx-auto">
-      <h2 className="mb-2 text-4xl font-medium tracking-tight sm:text-5xl">
+      <h2 className="mb-2 text-center text-4xl font-medium tracking-tight sm:text-5xl">
         Each dot is <span className="bg-gradient-to-r from-gradient-from to-gradient-to bg-clip-text text-transparent">~3.2 million</span> people
       </h2>
 
-      <p className="mb-8 text-sm text-muted-foreground">
+      <p className="mb-8 text-center text-sm text-muted-foreground">
         2,500 dots = 8.1 billion humans. Color = most advanced AI interaction, Feb 2026.
       </p>
 
