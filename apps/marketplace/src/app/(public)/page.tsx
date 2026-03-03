@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ScrollSpotlightText } from '@/components/scroll-spotlight-text'
 import { AiAdoptionGrid } from '@/components/ai-adoption-grid'
+import { UseCaseConstellation } from '@/components/use-case-constellation'
 
 const MISSION = 'AgentBay is on a mission to make high-quality AI agents simple, fast, and accessible for everyone.'
 const MISSION_ACCENT = [7, 8, 9, 15]
@@ -122,6 +123,11 @@ export default function LandingPage() {
         {/* ─── AI Adoption Grid ─── */}
         <section className="w-full px-6 py-32">
           <AiAdoptionGrid />
+        </section>
+
+        {/* ─── Use Cases ─── */}
+        <section className="w-full px-6 py-32">
+          <UseCaseConstellation />
         </section>
 
         {/* ─── The Shift ─── */}
