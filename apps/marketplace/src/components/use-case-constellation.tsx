@@ -293,9 +293,6 @@ export function UseCaseConstellation() {
           ctx.roundRect(drawX - pillW / 2, drawY - pillH / 2, pillW, pillH, pillR)
           ctx.fillStyle = `rgba(22, 20, 18, ${influence * 0.85 * fadeIn.current})`
           ctx.fill()
-          ctx.strokeStyle = `rgba(255, 255, 255, ${influence * 0.12 * fadeIn.current})`
-          ctx.lineWidth = 0.7
-          ctx.stroke()
         }
 
         // Text
