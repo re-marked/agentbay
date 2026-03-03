@@ -2,67 +2,120 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react'
 
-interface UseCase {
-  label: string
-  detail: string
+const USE_CASES = [
+  'Summarize 50 emails',
+  'Draft a pitch deck',
+  'Monitor competitors',
+  'Analyze spreadsheets',
+  'Write blog posts',
+  'Research any topic',
+  'Automate reports',
+  'Plan your week',
+  'Generate invoices',
+  'Proofread contracts',
+  'Schedule meetings',
+  'Transcribe calls',
+  'Track expenses',
+  'Design wireframes',
+  'Write ad copy',
+  'Audit your SEO',
+  'Build a dashboard',
+  'Create social posts',
+  'Respond to reviews',
+  'Prep for interviews',
+  'File your taxes',
+  'Translate documents',
+  'Onboard new hires',
+  'Debug your code',
+  'Scrape market data',
+  'Organize your files',
+  'Draft legal briefs',
+  'Manage inventory',
+  'Forecast revenue',
+  'Write newsletters',
+  'Process refunds',
+  'Update your CRM',
+  'Create slide decks',
+  'Summarize research',
+  'Plan a product launch',
+  'Write release notes',
+  'Clean up datasets',
+  'Generate test cases',
+  'Moderate comments',
+  'Track KPIs daily',
+  'Compare vendors',
+  'Draft proposals',
+  'Review pull requests',
+  'Extract PDF data',
+  'Reply to support tickets',
+  'Compile meeting notes',
+  'Curate reading lists',
+  'Score leads',
+  'Create user personas',
+  'Map customer journeys',
+  'Benchmark performance',
+  'Draft cold emails',
+  'Write documentation',
+  'Analyze sentiment',
+  'Generate color palettes',
+  'Outline a book',
+  'Create meal plans',
+  'Plan travel itineraries',
+  'Write thank-you notes',
+  'Prepare tax documents',
+  'Set up automations',
+  'Grade assignments',
+  'Create workout plans',
+  'Summarize podcasts',
+  'Track habit streaks',
+  'Write cover letters',
+  'Optimize ad spend',
+  'Build email sequences',
+  'Analyze competitors',
+  'Draft policy docs',
+  'Create brand guidelines',
+  'Map org structures',
+]
+
+interface Cell {
+  text: string
   x: number
   y: number
-  angle: number
-  radius: number
-  speed: number
-  size: number
+  w: number
+  h: number
+  baseAlpha: number
 }
-
-const USE_CASES: Omit<UseCase, 'x' | 'y'>[] = [
-  { label: 'Summarize 50 emails', detail: 'Inbox zero in 30 seconds. Key action items extracted, grouped by priority.', angle: 0, radius: 0.32, speed: 0.15, size: 38 },
-  { label: 'Draft a pitch deck', detail: 'From bullet points to polished slides. Narrative arc, data highlights, speaker notes.', angle: 0.9, radius: 0.28, speed: 0.12, size: 36 },
-  { label: 'Monitor competitors', detail: 'Daily scans across news, pricing changes, job postings. Weekly digest, zero manual work.', angle: 1.7, radius: 0.35, speed: 0.1, size: 40 },
-  { label: 'Analyze spreadsheets', detail: 'Upload a CSV, ask questions in plain English. Charts, trends, anomalies — instant.', angle: 2.5, radius: 0.26, speed: 0.18, size: 34 },
-  { label: 'Write blog posts', detail: 'Your voice, your style. First draft in 2 minutes, SEO-optimized, ready to edit.', angle: 3.3, radius: 0.3, speed: 0.14, size: 37 },
-  { label: 'Research any topic', detail: '50 sources cross-referenced in seconds. Cited summaries, not hallucinated guesses.', angle: 4.1, radius: 0.33, speed: 0.11, size: 39 },
-  { label: 'Automate reports', detail: 'Pull data, format tables, generate insights. Scheduled or on-demand, always consistent.', angle: 4.9, radius: 0.27, speed: 0.16, size: 35 },
-  { label: 'Plan your week', detail: 'Calendar analysis, priority sorting, time-blocking. A chief of staff that never sleeps.', angle: 5.7, radius: 0.31, speed: 0.13, size: 36 },
-]
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
 }
 
+const CANVAS_H = 560
+const LENS_RADIUS = 140
+const MAX_SCALE = 2.8
+const CELL_H = 32
+const CELL_PAD_X = 16
+const CELL_PAD_Y = 6
+const BASE_FONT = 10
+const MAX_FONT = 18
+
 export function UseCaseConstellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ w: 0, h: 0 })
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
-  const [tooltipData, setTooltipData] = useState<{ x: number; y: number; idx: number } | null>(null)
-  const tooltipRef = useRef<HTMLDivElement>(null)
-
-  const time = useRef(0)
   const animRaf = useRef(0)
-  const nodePositions = useRef<{ x: number; y: number }[]>(USE_CASES.map(() => ({ x: 0, y: 0 })))
-  const smoothHover = useRef<number[]>(USE_CASES.map(() => 0))
-  const centerPulse = useRef(0)
-  const smoothTooltip = useRef({ x: 0, y: 0 })
   const visible = useRef(false)
   const fadeIn = useRef(0)
+  const time = useRef(0)
 
-  // Particles drifting in background
-  const particles = useRef<{ x: number; y: number; vx: number; vy: number; size: number; alpha: number }[]>([])
+  // Smooth cursor
+  const mouseRaw = useRef({ x: -999, y: -999 })
+  const mouseSmooth = useRef({ x: -999, y: -999 })
+  const mouseActive = useRef(false)
 
-  useEffect(() => {
-    // Init particles
-    const p: typeof particles.current = []
-    for (let i = 0; i < 60; i++) {
-      p.push({
-        x: Math.random(),
-        y: Math.random(),
-        vx: (Math.random() - 0.5) * 0.0003,
-        vy: (Math.random() - 0.5) * 0.0003,
-        size: Math.random() * 1.5 + 0.5,
-        alpha: Math.random() * 0.3 + 0.05,
-      })
-    }
-    particles.current = p
-  }, [])
+  // Precomputed cell layout
+  const cells = useRef<Cell[]>([])
+  const layoutWidth = useRef(0)
 
   useEffect(() => {
     const el = containerRef.current
@@ -74,6 +127,56 @@ export function UseCaseConstellation() {
     return () => ro.disconnect()
   }, [])
 
+  // Recompute cell layout when width changes
+  useEffect(() => {
+    if (dimensions.w === 0) return
+    const w = dimensions.w
+
+    // Measure text widths with a temp canvas
+    const offscreen = document.createElement('canvas')
+    const octx = offscreen.getContext('2d')!
+    octx.font = `500 ${BASE_FONT}px system-ui, -apple-system, sans-serif`
+
+    const measured = USE_CASES.map((text) => ({
+      text,
+      textW: octx.measureText(text).width,
+    }))
+
+    // Flow layout: place cells left-to-right, wrap
+    const result: Cell[] = []
+    let cx = 0
+    let cy = 0
+    const gap = 6
+
+    for (const { text, textW } of measured) {
+      const cellW = textW + CELL_PAD_X * 2
+      if (cx + cellW > w && cx > 0) {
+        cx = 0
+        cy += CELL_H + gap
+      }
+      result.push({
+        text,
+        x: cx,
+        y: cy,
+        w: cellW,
+        h: CELL_H,
+        baseAlpha: 0.12 + Math.random() * 0.08,
+      })
+      cx += cellW + gap
+    }
+
+    // If we have leftover space vertically, center the grid
+    const totalH = cy + CELL_H
+    const offsetY = Math.max(0, (CANVAS_H - totalH) / 2)
+    for (const cell of result) {
+      cell.y += offsetY
+    }
+
+    cells.current = result
+    layoutWidth.current = w
+  }, [dimensions.w])
+
+  // Visibility check
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -90,6 +193,7 @@ export function UseCaseConstellation() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
+  // Animation loop
   useEffect(() => {
     const animate = () => {
       const canvas = canvasRef.current
@@ -97,7 +201,6 @@ export function UseCaseConstellation() {
         animRaf.current = requestAnimationFrame(animate)
         return
       }
-
       const ctx = canvas.getContext('2d')
       if (!ctx) {
         animRaf.current = requestAnimationFrame(animate)
@@ -105,15 +208,18 @@ export function UseCaseConstellation() {
       }
 
       if (visible.current && fadeIn.current < 1) {
-        fadeIn.current = Math.min(1, fadeIn.current + 0.008)
+        fadeIn.current = Math.min(1, fadeIn.current + 0.01)
       }
-
       time.current += 0.008
-      centerPulse.current = Math.sin(time.current * 1.5) * 0.5 + 0.5
+
+      // Smooth cursor
+      const lerpAmt = mouseActive.current ? 0.08 : 0.04
+      mouseSmooth.current.x = lerp(mouseSmooth.current.x, mouseRaw.current.x, lerpAmt)
+      mouseSmooth.current.y = lerp(mouseSmooth.current.y, mouseRaw.current.y, lerpAmt)
 
       const dpr = window.devicePixelRatio || 1
       const w = dimensions.w
-      const h = 560
+      const h = CANVAS_H
 
       canvas.width = w * dpr
       canvas.height = h * dpr
@@ -122,167 +228,70 @@ export function UseCaseConstellation() {
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, w, h)
 
-      const cx = w / 2
-      const cy = h / 2
-      const scale = Math.min(w, h)
+      const mx = mouseSmooth.current.x
+      const my = mouseSmooth.current.y
+      const isHovering = mouseActive.current && mx > -500
 
-      // Update particles
-      for (const p of particles.current) {
-        p.x += p.vx
-        p.y += p.vy
-        if (p.x < 0 || p.x > 1) p.vx *= -1
-        if (p.y < 0 || p.y > 1) p.vy *= -1
-      }
+      // Draw lens glow
+      if (isHovering && fadeIn.current > 0.3) {
+        const grad = ctx.createRadialGradient(mx, my, 0, mx, my, LENS_RADIUS * 1.2)
+        grad.addColorStop(0, `rgba(56, 149, 255, ${0.06 * fadeIn.current})`)
+        grad.addColorStop(0.5, `rgba(56, 149, 255, ${0.02 * fadeIn.current})`)
+        grad.addColorStop(1, 'rgba(56, 149, 255, 0)')
+        ctx.fillStyle = grad
+        ctx.fillRect(mx - LENS_RADIUS * 1.5, my - LENS_RADIUS * 1.5, LENS_RADIUS * 3, LENS_RADIUS * 3)
 
-      // Draw particles
-      ctx.globalAlpha = fadeIn.current * 0.6
-      for (const p of particles.current) {
+        // Lens ring
         ctx.beginPath()
-        ctx.arc(p.x * w, p.y * h, p.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`
-        ctx.fill()
-      }
-      ctx.globalAlpha = 1
-
-      // Compute node positions
-      for (let i = 0; i < USE_CASES.length; i++) {
-        const uc = USE_CASES[i]
-        const a = uc.angle + time.current * uc.speed
-        const r = uc.radius * scale
-        // Slight wobble
-        const wobbleX = Math.sin(time.current * 0.7 + i * 2) * 8
-        const wobbleY = Math.cos(time.current * 0.5 + i * 3) * 6
-        nodePositions.current[i] = {
-          x: cx + Math.cos(a) * r + wobbleX,
-          y: cy + Math.sin(a) * r + wobbleY,
-        }
-      }
-
-      // Smooth hover transitions
-      for (let i = 0; i < USE_CASES.length; i++) {
-        const target = hoveredIdx === i ? 1 : 0
-        smoothHover.current[i] = lerp(smoothHover.current[i], target, 0.06)
-      }
-
-      // Draw connections from center to nodes
-      for (let i = 0; i < USE_CASES.length; i++) {
-        const pos = nodePositions.current[i]
-        const hover = smoothHover.current[i]
-        const baseAlpha = 0.06 + hover * 0.2
-
-        ctx.beginPath()
-        ctx.moveTo(cx, cy)
-        ctx.lineTo(pos.x, pos.y)
-        ctx.strokeStyle = `rgba(255, 255, 255, ${baseAlpha * fadeIn.current})`
-        ctx.lineWidth = 1 + hover * 1.5
-        ctx.stroke()
-
-        // Pulse traveling along the line
-        if (fadeIn.current > 0.5) {
-          const pulseT = (time.current * 0.3 + i * 0.3) % 1
-          const px = lerp(cx, pos.x, pulseT)
-          const py = lerp(cy, pos.y, pulseT)
-          ctx.beginPath()
-          ctx.arc(px, py, 1.5 + hover * 2, 0, Math.PI * 2)
-          ctx.fillStyle = `rgba(255, 255, 255, ${(0.15 + hover * 0.4) * fadeIn.current})`
-          ctx.fill()
-        }
-      }
-
-      // Draw inter-node connections (faint mesh)
-      for (let i = 0; i < USE_CASES.length; i++) {
-        for (let j = i + 1; j < USE_CASES.length; j++) {
-          const a = nodePositions.current[i]
-          const b = nodePositions.current[j]
-          const dist = Math.hypot(a.x - b.x, a.y - b.y)
-          if (dist < scale * 0.35) {
-            const alpha = (1 - dist / (scale * 0.35)) * 0.04 * fadeIn.current
-            ctx.beginPath()
-            ctx.moveTo(a.x, a.y)
-            ctx.lineTo(b.x, b.y)
-            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`
-            ctx.lineWidth = 0.5
-            ctx.stroke()
-          }
-        }
-      }
-
-      // Draw center node
-      const centerGlow = 12 + centerPulse.current * 8
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, centerGlow * 3)
-      grad.addColorStop(0, `rgba(56, 149, 255, ${0.15 * fadeIn.current})`)
-      grad.addColorStop(1, 'rgba(56, 149, 255, 0)')
-      ctx.fillStyle = grad
-      ctx.fillRect(cx - centerGlow * 3, cy - centerGlow * 3, centerGlow * 6, centerGlow * 6)
-
-      ctx.beginPath()
-      ctx.arc(cx, cy, centerGlow, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(56, 149, 255, ${(0.3 + centerPulse.current * 0.15) * fadeIn.current})`
-      ctx.fill()
-
-      ctx.beginPath()
-      ctx.arc(cx, cy, 6, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * fadeIn.current})`
-      ctx.fill()
-
-      // Draw nodes
-      for (let i = 0; i < USE_CASES.length; i++) {
-        const pos = nodePositions.current[i]
-        const uc = USE_CASES[i]
-        const hover = smoothHover.current[i]
-        const isAnyHovered = hoveredIdx !== null
-        const dimFactor = isAnyHovered ? (hoveredIdx === i ? 1 : lerp(1, 0.25, smoothHover.current[hoveredIdx!] > 0.1 ? 1 : 0)) : 1
-        const nodeAlpha = fadeIn.current * lerp(dimFactor, 1, hover)
-
-        // Glow
-        if (hover > 0.01) {
-          const glowR = uc.size * (1 + hover * 0.8)
-          const glowGrad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, glowR)
-          glowGrad.addColorStop(0, `rgba(56, 149, 255, ${hover * 0.2 * fadeIn.current})`)
-          glowGrad.addColorStop(1, 'rgba(56, 149, 255, 0)')
-          ctx.fillStyle = glowGrad
-          ctx.fillRect(pos.x - glowR, pos.y - glowR, glowR * 2, glowR * 2)
-        }
-
-        // Node circle
-        const r = (uc.size / 2) * (1 + hover * 0.15)
-        ctx.beginPath()
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(30, 27, 24, ${nodeAlpha * 0.85})`
-        ctx.fill()
-        ctx.strokeStyle = `rgba(255, 255, 255, ${(0.12 + hover * 0.3) * nodeAlpha})`
+        ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.06 * fadeIn.current})`
         ctx.lineWidth = 1
         ctx.stroke()
+      }
 
-        // Label
-        ctx.fillStyle = `rgba(255, 255, 255, ${(0.7 + hover * 0.3) * nodeAlpha})`
-        ctx.font = `500 ${11 + hover * 1}px system-ui, sans-serif`
+      // Draw cells
+      for (const cell of cells.current) {
+        const cellCx = cell.x + cell.w / 2
+        const cellCy = cell.y + cell.h / 2
+        const dist = isHovering ? Math.hypot(cellCx - mx, cellCy - my) : Infinity
+
+        // How much is this cell inside the lens (0 = outside, 1 = center)
+        const lensT = isHovering ? Math.max(0, 1 - dist / LENS_RADIUS) : 0
+        // Smooth falloff (ease-out cubic)
+        const influence = lensT * lensT * (3 - 2 * lensT)
+
+        const scale = 1 + influence * (MAX_SCALE - 1)
+        const fontSize = BASE_FONT + influence * (MAX_FONT - BASE_FONT)
+        const alpha = lerp(cell.baseAlpha, 1, influence) * fadeIn.current
+
+        // Subtle drift animation for idle cells
+        const driftX = Math.sin(time.current * 0.5 + cell.x * 0.01) * 1.5 * (1 - influence)
+        const driftY = Math.cos(time.current * 0.3 + cell.y * 0.02) * 1 * (1 - influence)
+
+        const drawX = cellCx + driftX
+        const drawY = cellCy + driftY
+
+        // Background pill (only when magnified)
+        if (influence > 0.05) {
+          const pillW = cell.w * scale * 0.5 + fontSize * cell.text.length * 0.32
+          const pillH = fontSize * 1.8
+          const pillR = pillH / 2
+
+          ctx.beginPath()
+          ctx.roundRect(drawX - pillW / 2, drawY - pillH / 2, pillW, pillH, pillR)
+          ctx.fillStyle = `rgba(30, 27, 24, ${influence * 0.7 * fadeIn.current})`
+          ctx.fill()
+          ctx.strokeStyle = `rgba(255, 255, 255, ${influence * 0.15 * fadeIn.current})`
+          ctx.lineWidth = 0.5
+          ctx.stroke()
+        }
+
+        // Text
+        ctx.font = `500 ${fontSize}px system-ui, -apple-system, sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-
-        // Word-wrap inside node
-        const words = uc.label.split(' ')
-        if (words.length <= 2) {
-          ctx.fillText(uc.label, pos.x, pos.y)
-        } else {
-          const mid = Math.ceil(words.length / 2)
-          ctx.fillText(words.slice(0, mid).join(' '), pos.x, pos.y - 6)
-          ctx.fillText(words.slice(mid).join(' '), pos.x, pos.y + 7)
-        }
-      }
-
-      // Smooth tooltip position
-      if (tooltipData) {
-        smoothTooltip.current.x = lerp(smoothTooltip.current.x, tooltipData.x, 0.1)
-        smoothTooltip.current.y = lerp(smoothTooltip.current.y, tooltipData.y, 0.1)
-      }
-
-      const tip = tooltipRef.current
-      const container = containerRef.current
-      if (tip && container) {
-        const cr = container.getBoundingClientRect()
-        tip.style.left = `${smoothTooltip.current.x - cr.left}px`
-        tip.style.top = `${smoothTooltip.current.y - cr.top - 20}px`
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
+        ctx.fillText(cell.text, drawX, drawY)
       }
 
       animRaf.current = requestAnimationFrame(animate)
@@ -290,39 +299,22 @@ export function UseCaseConstellation() {
 
     animRaf.current = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(animRaf.current)
-  }, [dimensions, hoveredIdx, tooltipData])
+  }, [dimensions])
 
   const handleMouse = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    const mx = e.clientX - rect.left
-    const my = e.clientY - rect.top
-
-    let closest = -1
-    let closestDist = Infinity
-
-    for (let i = 0; i < USE_CASES.length; i++) {
-      const pos = nodePositions.current[i]
-      const dist = Math.hypot(pos.x - mx, pos.y - my)
-      if (dist < USE_CASES[i].size && dist < closestDist) {
-        closest = i
-        closestDist = dist
-      }
+    mouseRaw.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
     }
-
-    if (closest >= 0) {
-      setHoveredIdx(closest)
-      setTooltipData({ x: e.clientX, y: e.clientY, idx: closest })
-    } else {
-      setHoveredIdx(null)
-      setTooltipData(null)
-    }
+    mouseActive.current = true
   }, [])
 
   const handleLeave = useCallback(() => {
-    setHoveredIdx(null)
-    setTooltipData(null)
+    mouseActive.current = false
+    mouseRaw.current = { x: -999, y: -999 }
   }, [])
 
   return (
@@ -334,34 +326,16 @@ export function UseCaseConstellation() {
         </span>
       </h2>
       <p className="mb-8 text-center text-sm text-muted-foreground">
-        Hover a node to see what your agents can handle. Each one replaces hours of manual work.
+        Move your cursor to explore. Each phrase is a task your agents handle in seconds.
       </p>
 
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouse}
         onMouseLeave={handleLeave}
-        className="w-full cursor-crosshair"
-        style={{ height: 560 }}
+        className="w-full cursor-none"
+        style={{ height: CANVAS_H }}
       />
-
-      {/* Tooltip */}
-      <div
-        ref={tooltipRef}
-        className="pointer-events-none absolute z-50 -translate-x-1/2 -translate-y-full"
-        style={{ opacity: hoveredIdx !== null ? 1 : 0, transition: 'opacity 0.3s ease' }}
-      >
-        {hoveredIdx !== null && (
-          <div className="max-w-xs rounded-xl border border-white/10 bg-card/95 px-4 py-3 shadow-2xl backdrop-blur-md">
-            <p className="mb-1 text-sm font-medium text-foreground">
-              {USE_CASES[hoveredIdx].label}
-            </p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {USE_CASES[hoveredIdx].detail}
-            </p>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
