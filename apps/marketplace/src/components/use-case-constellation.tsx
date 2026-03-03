@@ -245,27 +245,6 @@ export function UseCaseConstellation() {
       const my = mouseSmooth.current.y
       const hs = hoverStrength.current
 
-      // Lens glow (white only)
-      if (hs > 0.01 && fadeIn.current > 0.2) {
-        const grad = ctx.createRadialGradient(mx, my, 0, mx, my, LENS_RADIUS * 1.3)
-        grad.addColorStop(0, `rgba(255, 255, 255, ${0.04 * hs * fadeIn.current})`)
-        grad.addColorStop(0.6, `rgba(255, 255, 255, ${0.015 * hs * fadeIn.current})`)
-        grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
-        ctx.fillStyle = grad
-        ctx.beginPath()
-        ctx.arc(mx, my, LENS_RADIUS * 1.3, 0, Math.PI * 2)
-        ctx.fill()
-
-        // Ring
-        ctx.beginPath()
-        ctx.arc(mx, my, LENS_RADIUS, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.06 * hs * fadeIn.current})`
-        ctx.lineWidth = 1
-        ctx.stroke()
-      }
-
-      // Collect displaced positions for connections
-      const displaced: { x: number; y: number; influence: number }[] = []
 
       // Draw cells
       for (let i = 0; i < cells.current.length; i++) {
@@ -296,9 +275,6 @@ export function UseCaseConstellation() {
         const driftY = Math.cos(time.current * 0.3 + cell.shimmerPhase * 1.3) * 0.8 * (1 - influence)
         drawX += driftX
         drawY += driftY
-
-        // Store for connections
-        displaced.push({ x: drawX, y: drawY, influence })
 
         // Shimmer
         const shimmer = Math.sin(time.current * cell.shimmerSpeed + cell.shimmerPhase) * 0.04 + 0.04
@@ -332,27 +308,6 @@ export function UseCaseConstellation() {
         ctx.fillText(cell.text, drawX, drawY)
       }
 
-      // Draw connections between nearby magnified cells
-      if (hs > 0.1) {
-        for (let i = 0; i < displaced.length; i++) {
-          if (displaced[i].influence < 0.2) continue
-          for (let j = i + 1; j < displaced.length; j++) {
-            if (displaced[j].influence < 0.2) continue
-            const a = displaced[i]
-            const b = displaced[j]
-            const d = Math.hypot(a.x - b.x, a.y - b.y)
-            if (d < 120) {
-              const connAlpha = (1 - d / 120) * Math.min(a.influence, b.influence) * 0.12 * fadeIn.current
-              ctx.beginPath()
-              ctx.moveTo(a.x, a.y)
-              ctx.lineTo(b.x, b.y)
-              ctx.strokeStyle = `rgba(255, 255, 255, ${connAlpha})`
-              ctx.lineWidth = 0.5
-              ctx.stroke()
-            }
-          }
-        }
-      }
 
       // Cursor dot
       if (hs > 0.01 && fadeIn.current > 0.2) {
