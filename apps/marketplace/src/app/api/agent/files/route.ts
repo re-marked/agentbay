@@ -411,11 +411,57 @@ export async function GET(request: Request) {
     }
   }
 
-  // list / find — need machine or mock data
-  if (mock) {
-    if (find) {
+  // Helper: derive directory entries from workspace_files JSONB keys
+  function getDbDirs(basePath: string): string[] {
+    const files = (instance!.workspace_files ?? {}) as Record<string, string>
+    const prefix = basePath.endsWith('/') ? basePath : basePath + '/'
+    const dirs = new Set<string>()
+    for (const key of Object.keys(files)) {
+      if (key.startsWith(prefix)) {
+        const rest = key.slice(prefix.length)
+        const firstSegment = rest.split('/')[0]
+        if (firstSegment) dirs.add(firstSegment)
+      }
+    }
+    return [...dirs]
+  }
+
+  // Helper: format directory names as ls -la style output
+  function formatDirListing(dirs: string[]): string {
+    return dirs.map((d) => `drwxr-xr-x  2 node node 4096 Jan 01 00:00 ${d}`).join('\n')
+  }
+
+  // list / find — check DB workspace_files + machine/mock
+  if (list) {
+    const dbDirs = getDbDirs(path)
+    let machineOutput = ''
+
+    if (mock) {
+      machineOutput = MOCK_DIRS[path] ?? ''
+    } else if (running) {
+      try {
+        const fly = new FlyClient()
+        machineOutput = await fly.listDir(instance.fly_app_name, instance.fly_machine_id, path)
+      } catch {
+        // Machine listing failed — just use DB entries
+      }
+    }
+
+    // Merge: parse machine output for existing dir names, add DB-only dirs
+    const existingNames = new Set(
+      machineOutput.split('\n').filter(Boolean).map((line) => {
+        const parts = line.trim().split(/\s+/)
+        return parts[parts.length - 1]
+      })
+    )
+    const newDbDirs = dbDirs.filter((d) => !existingNames.has(d))
+    const combined = [machineOutput, formatDirListing(newDbDirs)].filter(Boolean).join('\n')
+    return NextResponse.json({ output: combined })
+  }
+
+  if (find) {
+    if (mock) {
       const pattern = find.replace('*', '.*')
-      // Combine mock files + DB-saved files for discovery
       const allPaths = new Set([
         ...Object.keys(MOCK_MEMORY_FILES),
         ...Object.keys((instance.workspace_files ?? {}) as Record<string, string>),
@@ -425,26 +471,17 @@ export async function GET(request: Request) {
         .join('\n')
       return NextResponse.json({ output: matching })
     }
-    if (list) {
-      return NextResponse.json({ output: MOCK_DIRS[path] ?? '' })
+    if (!running) {
+      return NextResponse.json({ error: 'Agent must be running' }, { status: 409 })
     }
-  }
-
-  if (!running) {
-    return NextResponse.json({ error: 'Agent must be running' }, { status: 409 })
-  }
-
-  try {
-    const fly = new FlyClient()
-    if (find) {
+    try {
+      const fly = new FlyClient()
       const output = await fly.findFiles(instance.fly_app_name, instance.fly_machine_id, path, find)
       return NextResponse.json({ output })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to read file'
+      return NextResponse.json({ error: message }, { status: 500 })
     }
-    const output = await fly.listDir(instance.fly_app_name, instance.fly_machine_id, path)
-    return NextResponse.json({ output })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to read file'
-    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
