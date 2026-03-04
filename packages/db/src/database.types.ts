@@ -309,6 +309,172 @@ export type Database = {
           },
         ]
       }
+      channel_members: {
+        Row: {
+          channel_id: string
+          id: string
+          joined_at: string
+          last_read_at: string | null
+          member_id: string
+          role: string
+        }
+        Insert: {
+          channel_id: string
+          id?: string
+          joined_at?: string
+          last_read_at?: string | null
+          member_id: string
+          role?: string
+        }
+        Update: {
+          channel_id?: string
+          id?: string
+          joined_at?: string
+          last_read_at?: string | null
+          member_id?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_members_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channel_messages: {
+        Row: {
+          channel_id: string
+          content: string
+          created_at: string
+          deleted_at: string | null
+          depth: number
+          edited_at: string | null
+          id: string
+          mentions: string[]
+          message_kind: string
+          metadata: Json
+          origin_id: string | null
+          parent_id: string | null
+          sender_id: string
+        }
+        Insert: {
+          channel_id: string
+          content?: string
+          created_at?: string
+          deleted_at?: string | null
+          depth?: number
+          edited_at?: string | null
+          id?: string
+          mentions?: string[]
+          message_kind?: string
+          metadata?: Json
+          origin_id?: string | null
+          parent_id?: string | null
+          sender_id: string
+        }
+        Update: {
+          channel_id?: string
+          content?: string
+          created_at?: string
+          deleted_at?: string | null
+          depth?: number
+          edited_at?: string | null
+          id?: string
+          mentions?: string[]
+          message_kind?: string
+          metadata?: Json
+          origin_id?: string | null
+          parent_id?: string | null
+          sender_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_messages_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_messages_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "channel_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channels: {
+        Row: {
+          archived: boolean
+          created_at: string
+          description: string | null
+          id: string
+          kind: string
+          name: string
+          pinned: boolean
+          project_id: string
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          kind?: string
+          name: string
+          pinned?: boolean
+          project_id: string
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          pinned?: boolean
+          project_id?: string
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channels_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channels_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chat_agents: {
         Row: {
           added_at: string
@@ -530,23 +696,80 @@ export type Database = {
           },
         ]
       }
+      externals: {
+        Row: {
+          config: Json
+          created_at: string
+          external_id: string
+          external_name: string | null
+          id: string
+          last_synced_at: string | null
+          member_id: string
+          project_id: string
+          service: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          external_id: string
+          external_name?: string | null
+          id?: string
+          last_synced_at?: string | null
+          member_id: string
+          project_id: string
+          service: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          external_id?: string
+          external_name?: string | null
+          id?: string
+          last_synced_at?: string | null
+          member_id?: string
+          project_id?: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "externals_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "externals_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       instance_skills: {
         Row: {
           id: string
-          instance_id: string
           installed_at: string
+          instance_id: string
           skill_id: string
         }
         Insert: {
           id?: string
-          instance_id: string
           installed_at?: string
+          instance_id: string
           skill_id: string
         }
         Update: {
           id?: string
-          instance_id?: string
           installed_at?: string
+          instance_id?: string
           skill_id?: string
         }
         Relationships: [
@@ -562,6 +785,76 @@ export type Database = {
             columns: ["skill_id"]
             isOneToOne: false
             referencedRelation: "skills"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      members: {
+        Row: {
+          color: string | null
+          created_at: string
+          display_name: string
+          ephemeral: boolean
+          id: string
+          instance_id: string | null
+          metadata: Json
+          project_id: string
+          rank: string
+          spawned_by: string | null
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          display_name: string
+          ephemeral?: boolean
+          id?: string
+          instance_id?: string | null
+          metadata?: Json
+          project_id: string
+          rank?: string
+          spawned_by?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          display_name?: string
+          ephemeral?: boolean
+          id?: string
+          instance_id?: string | null
+          metadata?: Json
+          project_id?: string
+          rank?: string
+          spawned_by?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "members_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "agent_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "members_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "members_spawned_by_fkey"
+            columns: ["spawned_by"]
+            isOneToOne: false
+            referencedRelation: "members"
             referencedColumns: ["id"]
           },
         ]
@@ -609,6 +902,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          master_member_id: string | null
           name: string
           updated_at: string
           user_id: string
@@ -617,6 +911,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          master_member_id?: string | null
           name: string
           updated_at?: string
           user_id: string
@@ -625,11 +920,19 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          master_member_id?: string | null
           name?: string
           updated_at?: string
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "projects_master_member_id_fkey"
+            columns: ["master_member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "projects_user_id_fkey"
             columns: ["user_id"]
@@ -766,63 +1069,169 @@ export type Database = {
       }
       skills: {
         Row: {
-          id: string
-          slug: string
-          name: string
+          author: string | null
+          category: string
+          created_at: string
           description: string
           emoji: string | null
-          category: string
-          skill_content: string
-          source: string
-          requires: Json | null
-          version: string
-          author: string | null
           homepage: string | null
-          total_installs: number
-          tags: string[] | null
+          id: string
+          name: string
+          requires: Json | null
+          skill_content: string
+          slug: string
+          source: string
           status: string
+          tags: string[] | null
+          total_installs: number
+          updated_at: string
+          version: string
+        }
+        Insert: {
+          author?: string | null
+          category?: string
+          created_at?: string
+          description: string
+          emoji?: string | null
+          homepage?: string | null
+          id?: string
+          name: string
+          requires?: Json | null
+          skill_content: string
+          slug: string
+          source?: string
+          status?: string
+          tags?: string[] | null
+          total_installs?: number
+          updated_at?: string
+          version?: string
+        }
+        Update: {
+          author?: string | null
+          category?: string
+          created_at?: string
+          description?: string
+          emoji?: string | null
+          homepage?: string | null
+          id?: string
+          name?: string
+          requires?: Json | null
+          skill_content?: string
+          slug?: string
+          source?: string
+          status?: string
+          tags?: string[] | null
+          total_installs?: number
+          updated_at?: string
+          version?: string
+        }
+        Relationships: []
+      }
+      tasks: {
+        Row: {
+          assigned_to: string | null
+          channel_id: string | null
+          completed_at: string | null
           created_at: string
+          created_by: string | null
+          description: string | null
+          due_at: string | null
+          id: string
+          metadata: Json
+          parent_task_id: string | null
+          priority: string
+          project_id: string
+          result: Json | null
+          started_at: string | null
+          status: string
+          team_id: string | null
+          title: string
           updated_at: string
         }
         Insert: {
-          id?: string
-          slug: string
-          name: string
-          description: string
-          emoji?: string | null
-          category?: string
-          skill_content: string
-          source?: string
-          requires?: Json | null
-          version?: string
-          author?: string | null
-          homepage?: string | null
-          total_installs?: number
-          tags?: string[] | null
-          status?: string
+          assigned_to?: string | null
+          channel_id?: string | null
+          completed_at?: string | null
           created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_at?: string | null
+          id?: string
+          metadata?: Json
+          parent_task_id?: string | null
+          priority?: string
+          project_id: string
+          result?: Json | null
+          started_at?: string | null
+          status?: string
+          team_id?: string | null
+          title: string
           updated_at?: string
         }
         Update: {
-          id?: string
-          slug?: string
-          name?: string
-          description?: string
-          emoji?: string | null
-          category?: string
-          skill_content?: string
-          source?: string
-          requires?: Json | null
-          version?: string
-          author?: string | null
-          homepage?: string | null
-          total_installs?: number
-          tags?: string[] | null
-          status?: string
+          assigned_to?: string | null
+          channel_id?: string | null
+          completed_at?: string | null
           created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_at?: string | null
+          id?: string
+          metadata?: Json
+          parent_task_id?: string | null
+          priority?: string
+          project_id?: string
+          result?: Json | null
+          started_at?: string | null
+          status?: string
+          team_id?: string | null
+          title?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tasks_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       team_agents: {
         Row: {
@@ -860,26 +1269,94 @@ export type Database = {
           },
         ]
       }
+      team_members: {
+        Row: {
+          id: string
+          joined_at: string
+          member_id: string
+          role: string
+          team_id: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string
+          member_id: string
+          role?: string
+          team_id: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string
+          member_id?: string
+          role?: string
+          team_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_members_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teams: {
         Row: {
           created_at: string
+          description: string | null
           id: string
+          leader_member_id: string | null
           name: string
+          parent_id: string | null
           project_id: string
+          status: string
+          updated_at: string
         }
         Insert: {
           created_at?: string
+          description?: string | null
           id?: string
+          leader_member_id?: string | null
           name: string
+          parent_id?: string | null
           project_id: string
+          status?: string
+          updated_at?: string
         }
         Update: {
           created_at?: string
+          description?: string | null
           id?: string
+          leader_member_id?: string | null
           name?: string
+          parent_id?: string | null
           project_id?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "teams_leader_member_id_fkey"
+            columns: ["leader_member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "teams_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "teams_project_id_fkey"
             columns: ["project_id"]
