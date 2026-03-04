@@ -97,14 +97,14 @@ function smoothstep(t: number) {
   return t * t * (3 - 2 * t)
 }
 
-const CANVAS_H = 520
-const LENS_RADIUS = 150
-const DISPLACE_STRENGTH = 35
-const BASE_FONT = 10
-const MAX_FONT = 16
-const CELL_H = 26
-const CELL_PAD_X = 12
-const GAP = 5
+const CANVAS_H = 620
+const LENS_RADIUS = 170
+const DISPLACE_STRENGTH = 40
+const BASE_FONT = 14
+const MAX_FONT = 22
+const CELL_H = 34
+const CELL_PAD_X = 16
+const GAP = 8
 
 export function UseCaseConstellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -169,10 +169,16 @@ export function UseCaseConstellation() {
       cx += cellW + GAP
     }
 
-    // Alternate row offset for visual variety
-    for (const cell of result) {
-      if (cell.row % 2 === 1) {
-        cell.x += 14
+    // Center each row horizontally
+    const maxRow = row
+    for (let r = 0; r <= maxRow; r++) {
+      const rowCells = result.filter(c => c.row === r)
+      if (rowCells.length === 0) continue
+      const last = rowCells[rowCells.length - 1]
+      const rowWidth = last.x + last.w - rowCells[0].x
+      const offsetX = (w - rowWidth) / 2
+      for (const cell of rowCells) {
+        cell.x += offsetX
       }
     }
 
@@ -343,7 +349,7 @@ export function UseCaseConstellation() {
   }, [])
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-5xl mx-auto">
+    <div ref={containerRef} className="relative w-full max-w-7xl mx-auto">
       <h2 className="mb-2 text-center text-4xl font-medium tracking-tight sm:text-5xl lg:text-6xl">
         What can they{' '}
         <span className="bg-gradient-to-r from-gradient-from to-gradient-to bg-clip-text text-transparent">
