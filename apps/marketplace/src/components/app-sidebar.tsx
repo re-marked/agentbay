@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Home, Settings, Plus, BarChart3, Key, MoreHorizontal, Pencil, Trash2, CompassIcon, Hash } from "lucide-react"
+import { Home, Settings, Plus, BarChart3, Key, Sparkles, MoreHorizontal, Pencil, Trash2, CompassIcon, Hash } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 
@@ -180,6 +180,14 @@ export function AppSidebar({
                   <Link href="/discover">
                     <CompassIcon className="size-4" />
                     <span>Discover</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === "/skills"}>
+                  <Link href="/skills">
+                    <Sparkles className="size-4" />
+                    <span>Skills</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
