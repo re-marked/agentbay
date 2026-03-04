@@ -63,7 +63,7 @@ export async function installSkill({ skillSlug, instanceId }: InstallSkillParams
 
   if (!instance) return { error: "Agent not found" } as const
 
-  // 3. Check not already installed
+  // 3. Check if already installed
   const { data: existing } = await service
     .from("instance_skills")
     .select("id")
@@ -72,14 +72,15 @@ export async function installSkill({ skillSlug, instanceId }: InstallSkillParams
     .limit(1)
     .single()
 
-  if (existing) return { error: "Skill already installed on this agent" } as const
-
-  // 4. Write SKILL.md to workspace_files
+  // 4. Write SKILL.md to workspace_files (always — fixes stale/wrong paths)
   const workspaceFiles = (instance.workspace_files as Record<string, string>) ?? {}
-  // Use subdirectory format: /data/workspace/skills/{name}/SKILL.md
-  // This matches what the agent skills UI expects when listing directories
   const skillDir = skill.slug.split('--').pop() || skill.slug
   const skillPath = `/data/workspace/skills/${skillDir}/SKILL.md`
+
+  // Clean up old flat-file path format if present
+  const oldFlatPath = `/data/workspace/skills/${skill.slug}.md`
+  delete workspaceFiles[oldFlatPath]
+
   workspaceFiles[skillPath] = skill.skill_content
 
   await service
@@ -87,13 +88,15 @@ export async function installSkill({ skillSlug, instanceId }: InstallSkillParams
     .update({ workspace_files: workspaceFiles })
     .eq("id", instanceId)
 
-  // 5. Insert instance_skills (auto-increments total_installs via trigger)
-  const { error: insertErr } = await service
-    .from("instance_skills")
-    .insert({ instance_id: instanceId, skill_id: skill.id })
+  // 5. Insert instance_skills if not already tracked
+  if (!existing) {
+    const { error: insertErr } = await service
+      .from("instance_skills")
+      .insert({ instance_id: instanceId, skill_id: skill.id })
 
-  if (insertErr) {
-    return { error: `Failed to record installation: ${insertErr.message}` } as const
+    if (insertErr) {
+      return { error: `Failed to record installation: ${insertErr.message}` } as const
+    }
   }
 
   revalidatePath("/skills")
