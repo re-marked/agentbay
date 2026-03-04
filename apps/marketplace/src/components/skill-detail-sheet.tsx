@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   SkillEmoji,
   SKILL_CATEGORY_COLORS,
@@ -266,9 +267,11 @@ export function SkillDetailSheet({
               Loading...
             </div>
           ) : detail?.skill_content ? (
-            <pre className="text-[13px] text-muted-foreground bg-card rounded-lg p-4 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
-              {detail.skill_content}
-            </pre>
+            <ScrollArea className="max-h-64 rounded-lg bg-card">
+              <pre className="text-[13px] text-muted-foreground p-4 whitespace-pre-wrap leading-relaxed">
+                {detail.skill_content}
+              </pre>
+            </ScrollArea>
           ) : (
             <p className="text-sm text-muted-foreground">
               No skill content available.
