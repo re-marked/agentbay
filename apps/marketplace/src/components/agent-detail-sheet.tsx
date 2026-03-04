@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Rocket, Users, Zap, X, Loader2 } from "lucide-react"
+import { Rocket, Users, Zap, X, Loader2, CircleAlert } from "lucide-react"
 import {
   Drawer,
   DrawerClose,
@@ -12,10 +12,19 @@ import {
   DrawerTitle,
   DrawerDescription,
 } from "@/components/ui/drawer"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentAvatar, CATEGORY_COLORS, type AgentListItem } from "@/lib/agents"
 import { RatingStars } from "@/components/agent-card"
 import { hireAgent, checkInstanceStatus } from "@/lib/hire/actions"
@@ -179,11 +188,6 @@ export function AgentDetailSheet({ agent, open, onOpenChange, user }: AgentDetai
 
         {/* Deploy CTA */}
         <DrawerFooter className="sticky bottom-0 bg-sidebar/95 backdrop-blur-sm border-t border-border/40 p-8">
-          {error && (
-            <Alert variant="destructive" className="mb-3 border-0 bg-red-500/10">
-              <AlertDescription className="text-red-400">{error}</AlertDescription>
-            </Alert>
-          )}
           <Button
             size="lg"
             disabled={deploying}
@@ -204,6 +208,22 @@ export function AgentDetailSheet({ agent, open, onOpenChange, user }: AgentDetai
           </Button>
         </DrawerFooter>
       </DrawerContent>
+
+      {/* Error dialog */}
+      <AlertDialog open={!!error} onOpenChange={(open) => { if (!open) setError(null) }}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-red-500/15">
+              <CircleAlert className="text-red-400" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Couldn&apos;t deploy</AlertDialogTitle>
+            <AlertDialogDescription>{error}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Got it</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Drawer>
   )
 }

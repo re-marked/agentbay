@@ -2,8 +2,18 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Rocket } from 'lucide-react'
+import { Loader2, Rocket, CircleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { hireAgent } from '@/lib/hire/actions'
 
 interface AgentHireButtonProps {
@@ -38,15 +48,11 @@ export function AgentHireButton({ agentSlug, agentName }: AgentHireButtonProps) 
       return
     }
 
-    // Redirect to workspace — provisioning poller handles the rest
     router.push('/workspace/home')
   }
 
   return (
-    <div>
-      {error && (
-        <p className="text-sm text-red-400 mb-3 text-center">{error}</p>
-      )}
+    <>
       <Button
         size="lg"
         disabled={deploying}
@@ -65,6 +71,21 @@ export function AgentHireButton({ agentSlug, agentName }: AgentHireButtonProps) 
           </>
         )}
       </Button>
-    </div>
+
+      <AlertDialog open={!!error} onOpenChange={(open) => { if (!open) setError(null) }}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-red-500/15">
+              <CircleAlert className="text-red-400" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Couldn&apos;t deploy</AlertDialogTitle>
+            <AlertDialogDescription>{error}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Got it</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
