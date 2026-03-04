@@ -211,7 +211,7 @@ export function AgentDetailSheet({ agent, open, onOpenChange, user }: AgentDetai
 
       {/* Error dialog */}
       <AlertDialog open={!!error} onOpenChange={(open) => { if (!open) setError(null) }}>
-        <AlertDialogContent size="sm">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-red-500/15">
               <CircleAlert className="text-red-400" />
@@ -219,7 +219,7 @@ export function AgentDetailSheet({ agent, open, onOpenChange, user }: AgentDetai
             <AlertDialogTitle>Couldn&apos;t deploy</AlertDialogTitle>
             <AlertDialogDescription>{error}</AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:justify-center">
             <AlertDialogAction>Got it</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

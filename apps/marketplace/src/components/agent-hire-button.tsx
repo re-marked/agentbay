@@ -73,7 +73,7 @@ export function AgentHireButton({ agentSlug, agentName }: AgentHireButtonProps) 
       </Button>
 
       <AlertDialog open={!!error} onOpenChange={(open) => { if (!open) setError(null) }}>
-        <AlertDialogContent size="sm">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-red-500/15">
               <CircleAlert className="text-red-400" />
@@ -81,7 +81,7 @@ export function AgentHireButton({ agentSlug, agentName }: AgentHireButtonProps) 
             <AlertDialogTitle>Couldn&apos;t deploy</AlertDialogTitle>
             <AlertDialogDescription>{error}</AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:justify-center">
             <AlertDialogAction>Got it</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
