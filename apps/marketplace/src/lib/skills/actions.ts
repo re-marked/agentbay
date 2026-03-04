@@ -76,7 +76,10 @@ export async function installSkill({ skillSlug, instanceId }: InstallSkillParams
 
   // 4. Write SKILL.md to workspace_files
   const workspaceFiles = (instance.workspace_files as Record<string, string>) ?? {}
-  const skillPath = `/data/workspace/skills/${skill.slug}.md`
+  // Use subdirectory format: /data/workspace/skills/{name}/SKILL.md
+  // This matches what the agent skills UI expects when listing directories
+  const skillDir = skill.slug.split('--').pop() || skill.slug
+  const skillPath = `/data/workspace/skills/${skillDir}/SKILL.md`
   workspaceFiles[skillPath] = skill.skill_content
 
   await service
