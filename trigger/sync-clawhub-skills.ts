@@ -254,7 +254,7 @@ export const syncClawhubSkills = schedules.task({
               source: 'openclaw',
               version: meta.latest?.version || '1.0.0',
               author: entry.author,
-              homepage: `https://clawhub.dev/skills/${entry.author}/${entry.skillSlug}`,
+              homepage: `https://clawhub.com/skills/${entry.author}/${entry.skillSlug}`,
               tags: [] as string[],
               requires: {},
               skill_content: skillContent || `# ${name}\n\n${description}`,

@@ -139,7 +139,7 @@ export function UseCaseConstellation() {
 
     const offscreen = document.createElement('canvas')
     const octx = offscreen.getContext('2d')!
-    octx.font = `500 ${BASE_FONT}px system-ui, -apple-system, sans-serif`
+    octx.font = `500 ${BASE_FONT}px 'SF Pro Display', system-ui, sans-serif`
 
     const result: Cell[] = []
     let cx = 0
@@ -289,7 +289,7 @@ export function UseCaseConstellation() {
 
         // Pill background
         if (influence > 0.08) {
-          ctx.font = `500 ${fontSize}px system-ui, -apple-system, sans-serif`
+          ctx.font = `500 ${fontSize}px 'SF Pro Display', system-ui, sans-serif`
           const tw = ctx.measureText(cell.text).width
           const pillW = tw + fontSize * 1.2
           const pillH = fontSize * 2
@@ -302,7 +302,7 @@ export function UseCaseConstellation() {
         }
 
         // Text
-        ctx.font = `500 ${fontSize}px system-ui, -apple-system, sans-serif`
+        ctx.font = `500 ${fontSize}px 'SF Pro Display', system-ui, sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
