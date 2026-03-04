@@ -9,6 +9,8 @@ interface HireAgentParams {
   agentSlug: string
 }
 
+const MAX_AGENTS_PER_USER = 6
+
 /**
  * Hire an agent from the marketplace.
  * Creates project/team if needed, creates agent_instance with status=provisioning,
@@ -19,6 +21,17 @@ export async function hireAgent({ agentSlug }: HireAgentParams) {
   if (!user) return { error: 'Unauthorized' } as const
 
   const service = createServiceClient()
+
+  // 0. Enforce agent limit
+  const { count } = await service
+    .from('agent_instances')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .not('status', 'in', '("destroyed","destroying")')
+
+  if (count !== null && count >= MAX_AGENTS_PER_USER) {
+    return { error: `You can't hire more than ${MAX_AGENTS_PER_USER} agents right now.` } as const
+  }
 
   // 1. Look up agent
   const { data: agent } = await service
