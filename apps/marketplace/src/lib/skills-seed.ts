@@ -1,4 +1,5 @@
 import { createServiceClient } from "@agentbay/db/server"
+import { pickEmoji } from "./skills"
 import CLAWHUB_SKILLS from "./clawhub-skills.json"
 
 /**
@@ -29,6 +30,7 @@ export async function seedDemoSkillsIfEmpty() {
 
   const skills = CLAWHUB_SKILLS.map((s) => ({
     ...s,
+    emoji: s.emoji || pickEmoji(s.slug),
     status: "published" as const,
     total_installs: Math.floor(Math.random() * 300) + 5,
   }))

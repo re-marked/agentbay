@@ -36,6 +36,25 @@ TOP_SLUGS.forEach((slug, i) => {
 const BATCH_SIZE = 200
 const MAX_SKILL_CONTENT_BYTES = 16384 // 16KB per skill
 
+const SKILL_EMOJIS = [
+  '\u{1F680}', '\u{1F52C}', '\u{1F9EA}', '\u{1F4A1}', '\u{1F527}', '\u2699\uFE0F',
+  '\u{1F50D}', '\u{1F4CA}', '\u{1F4DD}', '\u{1F4E6}', '\u{1F310}', '\u{1F5C3}\uFE0F',
+  '\u{1F916}', '\u{1F3AF}', '\u26A1', '\u{1F4AC}', '\u{1F512}', '\u{1F4CB}',
+  '\u{1F9ED}', '\u{1F4D0}', '\u{1F433}', '\u2601\uFE0F', '\u{1F525}', '\u{1F4F8}',
+  '\u{1F50E}', '\u{1F33F}', '\u{1F4E7}', '\u{1F30D}', '\u{1F6F0}\uFE0F', '\u23F0',
+  '\u{1F3A8}', '\u{1F4D6}', '\u{1F9E0}', '\u{1F4BB}', '\u270D\uFE0F', '\u{1F5FA}\uFE0F',
+  '\u{1F9EE}', '\u{1F393}', '\u{1F4EC}', '\u{1F3AD}', '\u{1F6E1}\uFE0F', '\u{1FAB7}',
+  '\u{1F4E3}', '\u25B2', '\u{1F4C4}', '\u{1F9F2}', '\u{1F4CE}', '\u{1F5C4}\uFE0F',
+]
+
+function pickEmoji(str: string): string {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0
+  }
+  return SKILL_EMOJIS[Math.abs(hash) % SKILL_EMOJIS.length]
+}
+
 /**
  * Simple YAML frontmatter parser — extracts name + description from SKILL.md
  */
@@ -230,7 +249,7 @@ export const syncClawhubSkills = schedules.task({
               slug: slug.slice(0, 255),
               name: name.length > 80 ? name.slice(0, 77) + '...' : name,
               description: description.slice(0, 500),
-              emoji: null as string | null,
+              emoji: pickEmoji(slug),
               category: categorize(name, description),
               source: 'openclaw',
               version: meta.latest?.version || '1.0.0',
