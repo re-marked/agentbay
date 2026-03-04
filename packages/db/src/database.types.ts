@@ -530,6 +530,42 @@ export type Database = {
           },
         ]
       }
+      instance_skills: {
+        Row: {
+          id: string
+          instance_id: string
+          installed_at: string
+          skill_id: string
+        }
+        Insert: {
+          id?: string
+          instance_id: string
+          installed_at?: string
+          skill_id: string
+        }
+        Update: {
+          id?: string
+          instance_id?: string
+          installed_at?: string
+          skill_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instance_skills_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "agent_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instance_skills_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "skills"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
@@ -727,6 +763,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      skills: {
+        Row: {
+          id: string
+          slug: string
+          name: string
+          description: string
+          emoji: string | null
+          category: string
+          skill_content: string
+          source: string
+          requires: Json | null
+          version: string
+          author: string | null
+          homepage: string | null
+          total_installs: number
+          tags: string[] | null
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          name: string
+          description: string
+          emoji?: string | null
+          category?: string
+          skill_content: string
+          source?: string
+          requires?: Json | null
+          version?: string
+          author?: string | null
+          homepage?: string | null
+          total_installs?: number
+          tags?: string[] | null
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          name?: string
+          description?: string
+          emoji?: string | null
+          category?: string
+          skill_content?: string
+          source?: string
+          requires?: Json | null
+          version?: string
+          author?: string | null
+          homepage?: string | null
+          total_installs?: number
+          tags?: string[] | null
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       team_agents: {
         Row: {
