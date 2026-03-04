@@ -129,11 +129,13 @@ export function SkillEmoji({
   const imgSize = { sm: 24, md: 28, lg: 36 }
   const textSize = { sm: "text-sm", md: "text-lg", lg: "text-2xl" }
 
-  if (emoji) {
+  const resolvedEmoji = emoji || pickEmoji(name)
+
+  if (resolvedEmoji) {
     return (
       <div className={`flex items-center justify-center bg-secondary shrink-0 ${sizeClasses[size]}`}>
         <img
-          src={emojiToTwemojiUrl(emoji)}
+          src={emojiToTwemojiUrl(resolvedEmoji)}
           alt={name}
           width={imgSize[size]}
           height={imgSize[size]}
