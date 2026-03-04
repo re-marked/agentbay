@@ -62,6 +62,9 @@ export function PublicSiteHeader() {
             <Link href="/discover">Discover</Link>
           </Button>
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" asChild>
+            <Link href="/skills">Skills</Link>
+          </Button>
+          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" asChild>
             <Link href="/workspace/home">Workspace</Link>
           </Button>
         </div>
