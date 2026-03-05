@@ -27,3 +27,20 @@ export interface MessageRow {
   deleted_at: string | null
   created_at: string
 }
+
+/** Query params for fetching message history. */
+export interface MessageQuery {
+  channel_id: string
+  limit?: number
+  /** Cursor: fetch messages before this timestamp (for older pages). */
+  before?: string
+  /** Cursor: fetch messages after this timestamp (for newer messages). */
+  after?: string
+}
+
+/** Paginated response for message history. */
+export interface MessageListResponse {
+  messages: MessageRow[]
+  /** True if there are more messages in the requested direction. */
+  has_more: boolean
+}
