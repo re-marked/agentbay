@@ -1,8 +1,6 @@
 # Build Phases
 
-## Phase 1 — Foundation (← you are here)
-
-Scaffold the app, prove messages flow in and persist.
+## Phase 1 — Foundation (done)
 
 - [x] Scaffold `apps/router` (Hono + TypeScript)
 - [x] `GET /health`
@@ -11,38 +9,30 @@ Scaffold the app, prove messages flow in and persist.
 - [ ] Basic request validation (zod)
 - [ ] Deploy to Fly.io as `agentbay-router`
 
-**Done when:** You can `curl POST /v1/messages` with a channel_id + sender_id +
-content and see the row in Supabase.
-
 ---
 
-## Phase 2 — Read Path + History
+## Phase 2 — Read Path (done)
 
-Enable the UI to fetch messages from the Router instead of querying Supabase
-directly.
-
-- [ ] `GET /v1/messages/:channelId` — paginated message history
-- [ ] `GET /v1/messages/:channelId?after=:messageId` — long-poll / cursor
+- [x] `GET /v1/messages/:channelId` — cursor-paginated message history
+- [x] `?before=` / `?after=` cursors with `has_more`
+- [x] Test console at `/workspace/test-router`
 - [ ] Wire marketplace UI to read from Router (replace direct SB queries)
 
-**Done when:** Chat UI loads message history from the Router.
-
 ---
 
-## Phase 3 — Streaming Bridge
+## Phase 3 — @mention Routing (← you are here)
 
-Port the SSE Gateway's WebSocket→SSE bridge into the Router. This is the
-critical path — it's what makes chat feel real-time.
+No streaming. No WebSocket. Agents are just HTTP endpoints.
 
-- [ ] `POST /v1/messages/:channelId/stream` — send user message + open SSE
-- [ ] WebSocket connection to agent Fly machine (OpenClaw v3 handshake)
-- [ ] Token-by-token SSE forwarding (delta events)
-- [ ] On stream complete: persist full message, run extract/route steps
-- [ ] Heartbeat/keepalive on SSE connection
-- [ ] Abort handling (client disconnect kills agent turn)
-
-**Done when:** User types a message, sees streaming response, message is
-persisted — all through the Router, not the SSE Gateway.
+- [x] @mention extraction (`mentions.ts`) — regex + DB member resolution
+- [x] Agent dispatch (`routing.ts`) — resolve instance → POST `/v1/chat/completions`
+- [x] Retry with exponential backoff (8 attempts, covers ~60s Fly wake)
+- [x] Depth guard (max 5 hops) + dedup (same agent once per origin)
+- [x] Recursive routing (agent responses re-enter pipeline)
+- [x] `origin_id` self-reference on root messages
+- [x] Wire into POST /v1/messages (fire-and-forget after persist)
+- [ ] Test with live agent (Personal AI on Fly)
+- [ ] Update test console to show routing in action
 
 ---
 
