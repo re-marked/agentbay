@@ -3,10 +3,11 @@ import type { MessagePayload, MessageRow, MessageQuery, MessageListResponse } fr
 
 /**
  * Persist a message to the channel_messages table.
- * This is step 3 of the message pipeline.
+ * Step 3 of the message pipeline.
  *
- * Future phases will add broadcast (step 4), extract (step 5),
- * route (step 6), and track (step 7) after this.
+ * Root messages (no origin_id) get origin_id set to their own id,
+ * so all messages in a routing chain share the same origin_id
+ * for simpler depth/dedup queries.
  */
 export async function persistMessage(payload: MessagePayload): Promise<MessageRow> {
   const sb = getSupabase()
@@ -31,7 +32,18 @@ export async function persistMessage(payload: MessagePayload): Promise<MessageRo
     throw new Error(`Failed to persist message: ${error.message}`)
   }
 
-  return data as MessageRow
+  const message = data as MessageRow
+
+  // Root messages: set origin_id to self so the entire chain shares one origin
+  if (!message.origin_id) {
+    await sb
+      .from('channel_messages')
+      .update({ origin_id: message.id })
+      .eq('id', message.id)
+    message.origin_id = message.id
+  }
+
+  return message
 }
 
 const DEFAULT_LIMIT = 50

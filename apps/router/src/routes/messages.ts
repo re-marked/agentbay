@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { persistMessage, fetchMessages } from '../lib/pipeline.js'
+import { routeMessage } from '../lib/routing.js'
 import type { MessagePayload } from '../lib/types.js'
 
 const messages = new Hono()
@@ -28,6 +29,13 @@ messages.post('/v1/messages', async (c) => {
 
   try {
     const message = await persistMessage(body)
+
+    // Fire-and-forget: extract @mentions, route to agents, persist responses.
+    // POST returns 201 immediately. Agent responses appear via Supabase Realtime.
+    routeMessage(message).catch((err) => {
+      console.error('[routing] Background routing failed:', err)
+    })
+
     return c.json({ message }, 201)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
