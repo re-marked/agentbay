@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { persistMessage } from '../lib/pipeline.js'
+import { persistMessage, fetchMessages } from '../lib/pipeline.js'
 import type { MessagePayload } from '../lib/types.js'
 
 const messages = new Hono()
@@ -14,7 +14,6 @@ const messages = new Hono()
 messages.post('/v1/messages', async (c) => {
   const body = await c.req.json<MessagePayload>()
 
-  // --- Validate required fields ---
   if (!body.channel_id || !body.sender_id) {
     return c.json({ error: 'channel_id and sender_id are required' }, 400)
   }
@@ -27,10 +26,39 @@ messages.post('/v1/messages', async (c) => {
     return c.json({ error: `message_kind must be one of: ${validKinds.join(', ')}` }, 400)
   }
 
-  // --- Pipeline ---
   try {
     const message = await persistMessage(body)
     return c.json({ message }, 201)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    return c.json({ error: msg }, 500)
+  }
+})
+
+/**
+ * GET /v1/messages/:channelId
+ *
+ * Fetch message history for a channel. Cursor-based pagination:
+ *   ?limit=50       (default 50, max 200)
+ *   ?before=<iso>   older messages (scroll up)
+ *   ?after=<iso>    newer messages (new arrivals)
+ *
+ * Returns messages in chronological order (oldest first).
+ */
+messages.get('/v1/messages/:channelId', async (c) => {
+  const channelId = c.req.param('channelId')
+  const limit = c.req.query('limit')
+  const before = c.req.query('before')
+  const after = c.req.query('after')
+
+  try {
+    const result = await fetchMessages({
+      channel_id: channelId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      before: before || undefined,
+      after: after || undefined,
+    })
+    return c.json(result)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
     return c.json({ error: msg }, 500)
