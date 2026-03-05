@@ -64,10 +64,16 @@ export function extractMentions(
     agentMembers.map((m) => [m.displayName.toLowerCase(), m]),
   )
 
-  const escaped = agentMembers.map((m) =>
+  // Sort by name length descending so "Personal AI" matches before "Personal"
+  const sorted = [...agentMembers].sort(
+    (a, b) => b.displayName.length - a.displayName.length,
+  )
+  const escaped = sorted.map((m) =>
     m.displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
   )
-  const re = new RegExp(`@(${escaped.join('|')})\\b`, 'gi')
+  // Use lookahead for boundary: match must be followed by whitespace, punctuation, or end-of-string
+  // This handles multi-word names like "Personal AI" that \b would break on
+  const re = new RegExp(`@(${escaped.join('|')})(?=[\\s,.:!?;]|$)`, 'gi')
 
   const matches = [...text.matchAll(re)]
   if (matches.length === 0) return []
