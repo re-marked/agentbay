@@ -79,25 +79,19 @@ export function extractMentions(
   if (matches.length === 0) return []
 
   const mentions: MentionMatch[] = []
+  const seen = new Set<string>()
 
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i]
+  for (const match of matches) {
     const name = match[1].toLowerCase()
     const member = nameToMember.get(name)
-    if (!member) continue
+    if (!member || seen.has(member.memberId)) continue
+    seen.add(member.memberId)
 
-    const start = match.index! + match[0].length
-    const end = i + 1 < matches.length ? matches[i + 1].index! : text.length
-    const message = text.slice(start, end).trim()
-
-    // Only route if there's actual content after the @mention
-    if (message) {
-      mentions.push({
-        memberId: member.memberId,
-        displayName: member.displayName,
-        message,
-      })
-    }
+    mentions.push({
+      memberId: member.memberId,
+      displayName: member.displayName,
+      message: text,
+    })
   }
 
   return mentions
