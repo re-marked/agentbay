@@ -1,0 +1,25 @@
+{
+  "name": "router",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Router — central message pipeline for AgentBay",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --project tsconfig.build.json",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "latest",
+    "@supabase/supabase-js": "latest",
+    "hono": "latest"
+  },
+  "devDependencies": {
+    "@agentbay/config": "workspace:*",
+    "@types/node": "^22",
+    "tsx": "latest",
+    "typescript": "^5"
+  }
+}
