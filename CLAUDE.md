@@ -17,7 +17,8 @@ App Store-style marketplace for OpenClaw AI agents. Users hire assistants; creat
 ```
 apps/
   marketplace/        # Next.js 15 app — main product (Vercel)
-  sse-gateway/        # Hono app — SSE proxy on Fly.io (bridges Vercel ↔ agent 6PN)
+  router/             # Hono app — central message pipeline (replaces SSE Gateway)
+  sse-gateway/        # Hono app — SSE proxy on Fly.io (legacy, being replaced by Router)
   docs/               # Architecture documentation
 packages/
   db/                 # Supabase client, types, auth middleware
@@ -222,9 +223,14 @@ You have full access to run infrastructure commands directly — never ask the u
 - **Service client for admin ops**: use `createServiceClient()` from `@agentbay/db/server` in Trigger.dev tasks — bypasses RLS
 - **Regular client for user ops**: use `createClient()` from `@agentbay/db/server` in route handlers/Server Components
 - **shadcn components**: go in `src/components/ui/` — don't edit these manually
-- **When working on a new feature**: create a git branch named feature/feature-name and commit & push changes on that branch
-- **When feature is ready**: merge the branch into dev via rebase with a proper documented PR  and delete the feature branch
-- **When the dev branch sees no bugs**: Merge dev into main via rebase with a proper documented PR and delete the branch
+- **Branching strategy (v2 development)**:
+  - `main` = stable production (AgentBay v1). Do NOT push directly.
+  - `dev` = v2 integration branch. All new workspace platform work lands here.
+  - `feature/*` = short-lived feature branches, always branched off `dev`.
+  - Flow: `feature/xyz` → PR into `dev` (rebase merge) → delete feature branch.
+  - When AgentBay v2 is ready: merge `dev` into `main` via PR.
+- **When working on a new feature**: create a git branch named `feature/feature-name` off `dev` and commit & push changes on that branch
+- **When feature is ready**: merge the branch into `dev` via rebase with a proper documented PR and delete the feature branch
 - **Prioritize committing more frequently (IMPORTANT)**: Commit often, with small, focused changes, multiple commits per each prompt. This makes it easier to review and merge changes.
 - **Always add co-authors**: Include both authors (me and Claude) in every commit. Make sure to include the email address of each author. My email is psyhik17@gmail.com and my Github username is re-marked.
 
