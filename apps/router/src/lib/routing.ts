@@ -1,5 +1,6 @@
 import { getSupabase } from './supabase.js'
 import { getChannelAgentMembers, extractMentions } from './mentions.js'
+import { setMemberStatus, isMemberWorking } from './tracking.js'
 import type { MessageRow } from './types.js'
 
 const MAX_DEPTH = 5
@@ -11,6 +12,15 @@ interface AgentInstanceInfo {
   flyAppName: string
   gatewayToken: string | null
 }
+
+interface DispatchTarget {
+  memberId: string
+  displayName: string
+  instanceId: string
+  message: string
+}
+
+// ─── Instance Resolution ────────────────────────────────────────────────────
 
 /** Resolve a member's agent_instance to get Fly app name and auth token. */
 async function resolveAgentInstance(instanceId: string): Promise<AgentInstanceInfo | null> {
@@ -29,6 +39,8 @@ async function resolveAgentInstance(instanceId: string): Promise<AgentInstanceIn
     gatewayToken: data.gateway_token,
   }
 }
+
+// ─── Agent HTTP Dispatch ────────────────────────────────────────────────────
 
 /**
  * POST to an agent's /v1/chat/completions endpoint with retry.
@@ -93,6 +105,8 @@ async function queryAgent(
   return `[Error: failed to reach ${flyApp}]`
 }
 
+// ─── Dedup Helpers ──────────────────────────────────────────────────────────
+
 /**
  * Get member UUIDs already mentioned in this message chain.
  * Used for deduplication — same agent is only woken once per origin.
@@ -113,9 +127,63 @@ async function getAlreadyMentionedMembers(originId: string): Promise<Set<string>
   return ids
 }
 
+// ─── DM Auto-Routing ────────────────────────────────────────────────────────
+
 /**
- * Persist an agent's response as a new channel_message.
+ * In DM channels (kind='direct'), every message from the user should
+ * wake the agent automatically — no @mention needed.
+ *
+ * Returns the agent member to dispatch to, or null if:
+ * - Channel is not a DM
+ * - The other member is not an agent
+ * - The sender IS the agent (don't wake yourself)
  */
+async function getDMTarget(
+  channelId: string,
+  senderId: string,
+): Promise<DispatchTarget | null> {
+  const sb = getSupabase()
+
+  // Check if this is a direct channel
+  const { data: channel, error: chErr } = await sb
+    .from('channels')
+    .select('kind')
+    .eq('id', channelId)
+    .single()
+
+  if (chErr || !channel || channel.kind !== 'direct') return null
+
+  // Get the other member in this DM
+  const { data: members, error: mErr } = await sb
+    .from('channel_members')
+    .select('member_id')
+    .eq('channel_id', channelId)
+    .neq('member_id', senderId)
+
+  if (mErr || !members || members.length === 0) return null
+
+  const otherMemberId = members[0].member_id
+
+  // Check if the other member is an agent
+  const { data: member, error: memErr } = await sb
+    .from('members')
+    .select('id, display_name, instance_id')
+    .eq('id', otherMemberId)
+    .not('instance_id', 'is', null)
+    .single()
+
+  if (memErr || !member || !member.instance_id) return null
+
+  return {
+    memberId: member.id,
+    displayName: member.display_name,
+    instanceId: member.instance_id,
+    message: '', // Will be set by caller
+  }
+}
+
+// ─── Persist Agent Response ─────────────────────────────────────────────────
+
 async function persistAgentResponse(
   channelId: string,
   senderId: string,
@@ -145,15 +213,84 @@ async function persistAgentResponse(
   return data as MessageRow
 }
 
+// ─── Core Dispatch ──────────────────────────────────────────────────────────
+
+/**
+ * Dispatch a message to a single agent: resolve instance, check cooldown,
+ * set status to working, query agent, persist response, set status to idle.
+ *
+ * Returns the agent's response message row (for recursive routing), or null on skip/failure.
+ */
+async function dispatchToAgent(
+  target: DispatchTarget,
+  channelId: string,
+  parentMessageId: string,
+  originId: string,
+  depth: number,
+): Promise<MessageRow | null> {
+  // Cooldown: skip if agent is already working
+  if (await isMemberWorking(target.memberId)) {
+    console.info(`[routing] ${target.displayName} is already working, skipping (cooldown)`)
+    return null
+  }
+
+  const instance = await resolveAgentInstance(target.instanceId)
+  if (!instance) {
+    console.warn(`[routing] No running/suspended instance for ${target.displayName}, skipping`)
+    return null
+  }
+
+  console.info(`[routing] Dispatching to ${target.displayName} → ${instance.flyAppName}`)
+
+  // TRACK: mark agent as working
+  await setMemberStatus(target.memberId, 'working')
+
+  try {
+    const response = await queryAgent(
+      instance.flyAppName,
+      instance.gatewayToken,
+      target.message,
+    )
+
+    const agentMessage = await persistAgentResponse(
+      channelId,
+      target.memberId,
+      response,
+      parentMessageId,
+      originId,
+      depth,
+    )
+
+    console.info(
+      `[routing] ${target.displayName} responded (${response.length} chars), depth=${agentMessage.depth}`,
+    )
+
+    return agentMessage
+  } finally {
+    // TRACK: always reset to idle, even on error
+    await setMemberStatus(target.memberId, 'idle')
+  }
+}
+
+// ─── Main Routing Function ──────────────────────────────────────────────────
+
 /**
  * Main routing function. Called asynchronously after message persist.
  *
- * 1. Check depth guard
- * 2. Get agent members in channel
- * 3. Extract @mentions from content
- * 4. Dedup against already-mentioned agents for this origin
- * 5. For each new mention: resolve instance → query agent → persist response
- * 6. Agent responses re-enter routing (recursive — handles agent-to-agent @mentions)
+ * Two routing modes:
+ *
+ * 1. DM auto-routing: In direct channels, every user message automatically
+ *    wakes the agent. No @mention needed — it's a 1:1 conversation.
+ *
+ * 2. @mention routing: In team/broadcast channels, extract @mentions from
+ *    content, resolve against channel members, dispatch to each agent.
+ *
+ * Both modes support:
+ * - Depth guard (max 5 hops)
+ * - Dedup (same agent once per origin chain)
+ * - Cooldown (skip if agent is already working)
+ * - Status tracking (idle → working → idle)
+ * - Recursive routing (agent responses re-enter pipeline)
  */
 export async function routeMessage(message: MessageRow): Promise<void> {
   if (message.depth >= MAX_DEPTH) {
@@ -163,14 +300,49 @@ export async function routeMessage(message: MessageRow): Promise<void> {
     return
   }
 
+  const originId = message.origin_id ?? message.id
+
+  // ── Mode 1: DM auto-routing ──────────────────────────────────────────────
+  const dmTarget = await getDMTarget(message.channel_id, message.sender_id)
+
+  if (dmTarget) {
+    // In DMs, the message IS for the agent — send the full content
+    dmTarget.message = message.content
+
+    // Dedup: check if this agent was already dispatched in this chain
+    const alreadyMentioned = await getAlreadyMentionedMembers(originId)
+    if (alreadyMentioned.has(dmTarget.memberId)) return
+
+    // Record the mention on the trigger message
+    const sb = getSupabase()
+    await sb
+      .from('channel_messages')
+      .update({ mentions: [dmTarget.memberId] })
+      .eq('id', message.id)
+
+    console.info(`[routing] DM auto-route to ${dmTarget.displayName}, depth=${message.depth}`)
+
+    const agentMessage = await dispatchToAgent(
+      dmTarget,
+      message.channel_id,
+      message.id,
+      originId,
+      message.depth + 1,
+    )
+
+    // Recursive: agent response might contain @mentions for other agents
+    if (agentMessage) {
+      await routeMessage(agentMessage)
+    }
+    return
+  }
+
+  // ── Mode 2: @mention routing ─────────────────────────────────────────────
   const agentMembers = await getChannelAgentMembers(message.channel_id)
   if (agentMembers.length === 0) return
 
   const mentions = extractMentions(message.content, agentMembers)
   if (mentions.length === 0) return
-
-  // origin_id: if this is a root message, it references itself (set in pipeline.ts)
-  const originId = message.origin_id ?? message.id
 
   // Dedup: skip agents already mentioned in this chain
   const alreadyMentioned = await getAlreadyMentionedMembers(originId)
@@ -194,40 +366,26 @@ export async function routeMessage(message: MessageRow): Promise<void> {
     const member = agentMembers.find((m) => m.memberId === mention.memberId)
     if (!member) continue
 
+    const target: DispatchTarget = {
+      memberId: member.memberId,
+      displayName: member.displayName,
+      instanceId: member.instanceId,
+      message: mention.message,
+    }
+
     try {
-      const instance = await resolveAgentInstance(member.instanceId)
-      if (!instance) {
-        console.warn(
-          `[routing] No running/suspended instance for ${mention.displayName}, skipping`,
-        )
-        continue
-      }
-
-      console.info(
-        `[routing] Dispatching to ${mention.displayName} → ${instance.flyAppName}`,
-      )
-
-      const response = await queryAgent(
-        instance.flyAppName,
-        instance.gatewayToken,
-        mention.message,
-      )
-
-      const agentMessage = await persistAgentResponse(
+      const agentMessage = await dispatchToAgent(
+        target,
         message.channel_id,
-        mention.memberId,
-        response,
         message.id,
         originId,
         message.depth + 1,
       )
 
-      console.info(
-        `[routing] ${mention.displayName} responded (${response.length} chars), depth=${agentMessage.depth}`,
-      )
-
       // Recursive: check if agent's response contains @mentions
-      await routeMessage(agentMessage)
+      if (agentMessage) {
+        await routeMessage(agentMessage)
+      }
     } catch (err) {
       console.error(`[routing] Error routing to ${mention.displayName}:`, err)
     }
