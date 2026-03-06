@@ -1,13 +1,13 @@
-# Build Phases
+# Router Build Phases
 
 ## Phase 1 — Foundation (done)
 
 - [x] Scaffold `apps/router` (Hono + TypeScript)
 - [x] `GET /health`
 - [x] `POST /v1/messages` — validate, persist to `channel_messages`
-- [ ] Auth middleware (service key check)
-- [ ] Basic request validation (zod)
-- [ ] Deploy to Fly.io as `agentbay-router`
+- [x] Zod request validation on all endpoints
+- [x] Auth middleware (service key Bearer token)
+- [x] `GET /v1/channels/:channelId/members` — member list for @mention autocomplete
 
 ---
 
@@ -16,13 +16,12 @@
 - [x] `GET /v1/messages/:channelId` — cursor-paginated message history
 - [x] `?before=` / `?after=` cursors with `has_more`
 - [x] Test console at `/workspace/test-router`
-- [ ] Wire marketplace UI to read from Router (replace direct SB queries)
 
 ---
 
-## Phase 3 — @mention Routing (← you are here)
+## Phase 3 — Routing Layer (done)
 
-No streaming. No WebSocket. Agents are just HTTP endpoints.
+@mention routing + DM auto-routing. No streaming. Agents are HTTP endpoints.
 
 - [x] @mention extraction (`mentions.ts`) — regex + DB member resolution
 - [x] Agent dispatch (`routing.ts`) — resolve instance → POST `/v1/chat/completions`
@@ -31,27 +30,23 @@ No streaming. No WebSocket. Agents are just HTTP endpoints.
 - [x] Recursive routing (agent responses re-enter pipeline)
 - [x] `origin_id` self-reference on root messages
 - [x] Wire into POST /v1/messages (fire-and-forget after persist)
-- [ ] Test with live agent (Personal AI on Fly)
-- [ ] Update test console to show routing in action
+- [x] DM auto-routing (direct channels wake agent without @mention)
+- [x] Cooldown guard (skip dispatch if agent is already working)
+- [x] Member status tracking (idle → working → idle) — pipeline step TRACK
+- [x] Verified with live Personal AI agent on Fly
 
 ---
 
-## Phase 4 — @mention Routing
+## Phase 4 — Deploy & Harden
 
-The multi-agent orchestration layer. When an agent mentions another agent,
-the Router wakes the target and forwards the message.
+- [x] Dockerfile (multi-stage Node 22-alpine)
+- [x] `fly.toml` (agentbay-router, iad, shared-cpu-1x/256mb)
+- [ ] Create Fly app + set secrets
+- [ ] `fly deploy` — first production deployment
+- [ ] Wire marketplace UI to use Router API (replace direct SB queries)
+- [ ] Rate limiting per sender per channel
 
-- [ ] Extract @mentions from completed agent messages
-- [ ] Resolve mention → member → agent_instance → Fly machine
-- [ ] Wake target machine (Fly start API)
-- [ ] POST message to target agent
-- [ ] Depth tracking (`origin_id` + `depth` on channel_messages)
-- [ ] Dedup guard (same agent only once per origin)
-- [ ] Timeout guard (120s per agent turn)
-- [ ] Cooldown guard (don't double-send if agent is mid-turn)
-
-**Done when:** Agent A @mentions Agent B, Agent B wakes up, responds, and
-the response appears in the channel — all tracked with depth.
+**Done when:** Router is live on Fly and the marketplace reads/writes through it.
 
 ---
 
@@ -78,7 +73,6 @@ User control over agent behavior.
 - [ ] `POST /v1/channels/:id/stop` — halt all in-flight agent processing
 - [ ] `DELETE /v1/messages/:id` — soft-delete
 - [ ] `PATCH /v1/messages/:id` — edit message content
-- [ ] Rate limiting per member per channel
 - [ ] Admin dashboard metrics (messages/sec, active agents, error rates)
 
 **Done when:** User can `/stop` a runaway agent chain.
