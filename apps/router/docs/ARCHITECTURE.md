@@ -43,41 +43,50 @@ Every message flows through these steps in order:
 
 ```
 1. RECEIVE    ← HTTP POST from UI, agent callback, or external webhook
-2. VALIDATE   ← Auth check, rate limit, membership check
+2. VALIDATE   ← Zod schema validation + service key auth check
 3. PERSIST    ← INSERT into channel_messages table
-4. BROADCAST  ← Supabase Realtime push (UI updates instantly)
-5. EXTRACT    ← Parse @mentions from content
-6. ROUTE      ← For each mentioned agent: wake machine, POST message
-7. TRACK      ← Update member status (idle → working)
+4. BROADCAST  ← Supabase Realtime auto-push (free — triggered by INSERT)
+5. EXTRACT    ← Parse @mentions from content (or detect DM target)
+6. ROUTE      ← For each target agent: resolve instance, POST message
+7. TRACK      ← Update member status (idle → working → idle)
 ```
 
 When an agent finishes and sends its response back, that response enters at
 step 1. The Router is agent-blind — it just processes messages.
 
-## Streaming
+## Two Routing Modes
 
-Real-time token streaming (agent → browser) is preserved from the SSE Gateway:
+### DM Auto-Routing (direct channels)
+In DM channels, every user message automatically wakes the agent. No @mention
+needed. The Router detects that the channel is `kind='direct'`, finds the other
+member, and dispatches if they're an agent. This makes DMs feel like a natural
+1:1 conversation.
 
-1. Router opens WebSocket to agent's Fly machine
-2. Agent streams response tokens over WebSocket
-3. Router forwards tokens to browser via SSE
-4. When stream completes, Router persists the full message (step 3)
-5. Router then runs steps 5–7 (extract mentions, route, track)
-
-Streaming is a special case where steps 3–7 are **deferred** until the stream
-completes. The user still sees real-time token output.
+### @Mention Routing (team/broadcast channels)
+In shared channels, the Router extracts @mentions from message content using
+regex matched against channel members. Each mentioned agent gets a dispatch.
+Agent responses re-enter the pipeline and can @mention other agents (recursive).
 
 ## Depth & Loop Guards
 
 Without protection, agents @mentioning each other loop forever.
 
-| Guard | Rule |
-|-------|------|
-| **Max depth** | 5 routing hops per originating user message |
-| **Dedup** | Same agent woken only once per originating message |
-| **Cooldown** | If agent is already processing in this channel, queue |
-| **Kill switch** | User sends `/stop` to halt all in-flight processing |
-| **Timeout** | 120s max per agent turn, then force-complete with error |
+| Guard | Rule | Status |
+|-------|------|--------|
+| **Max depth** | 5 routing hops per originating user message | Done |
+| **Dedup** | Same agent woken only once per originating message | Done |
+| **Cooldown** | If agent is already `working`, skip dispatch | Done |
+| **Kill switch** | User sends `/stop` to halt all in-flight processing | Phase 6 |
+| **Timeout** | 120s max per agent turn via AbortSignal | Done |
+
+## Authentication
+
+All `/v1/*` endpoints require a `Bearer` token in the `Authorization` header.
+The token must match the `ROUTER_SERVICE_KEY` environment variable.
+
+When `ROUTER_SERVICE_KEY` is not set (local dev), auth is bypassed entirely.
+
+`GET /health` is always public (for Fly.io health checks).
 
 ## Key Differences from SSE Gateway
 
@@ -86,9 +95,12 @@ Without protection, agents @mentioning each other loop forever.
 | **Persistence** | None — ephemeral relay | Every message persisted to `channel_messages` |
 | **Identity** | Opaque tokens | Members table (human or agent) |
 | **Routing** | Hardcoded `subAgents` map in request | Resolved from channel membership + @mentions |
+| **DMs** | N/A | Auto-routing — no @mention needed |
 | **Scope** | Single agent per request | Project-wide, multi-channel, multi-agent |
 | **Threads** | Synthetic SSE events | Real DB rows with `parent_id` + `origin_id` |
-| **External** | N/A | Webhook ingestion for Telegram, Slack, etc. |
+| **Status** | No tracking | Member status: idle → working → idle |
+| **Auth** | `x-gateway-secret` header | Bearer token on all /v1/* routes |
+| **External** | N/A | Webhook ingestion (Phase 5) |
 
 ## Database Tables Used
 
@@ -100,20 +112,35 @@ Without protection, agents @mentioning each other loop forever.
 
 ## API Surface
 
-### Phase 1 (current)
-- `POST /v1/messages` — persist a message to a channel
-- `GET /health` — readiness check
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | Public | Readiness check |
+| `POST` | `/v1/messages` | Bearer | Send a message (triggers pipeline) |
+| `GET` | `/v1/messages/:channelId` | Bearer | Paginated message history |
+| `GET` | `/v1/channels/:channelId/members` | Bearer | Channel member list |
 
-### Phase 2
-- `GET /v1/messages/:channelId` — fetch message history
-- `POST /v1/messages/:channelId/stream` — send message + stream agent response via SSE
+### Future Endpoints
 
-### Phase 3
-- `POST /v1/ingest` — external webhook ingestion (Telegram, Slack, etc.)
-- `DELETE /v1/messages/:id` — soft-delete a message
-- `PATCH /v1/messages/:id` — edit a message
+| Method | Path | Phase | Description |
+|--------|------|-------|-------------|
+| `POST` | `/v1/ingest` | 5 | External webhook ingestion |
+| `POST` | `/v1/channels/:id/stop` | 6 | Kill switch |
+| `DELETE` | `/v1/messages/:id` | 6 | Soft-delete |
+| `PATCH` | `/v1/messages/:id` | 6 | Edit message |
 
-### Phase 4
-- Full streaming pipeline with @mention routing + depth guards
-- Agent wake/sleep lifecycle management
-- `/stop` kill switch endpoint
+## Deployment
+
+- **App**: `agentbay-router` on Fly.io
+- **Region**: `iad`
+- **VM**: `shared-cpu-1x` / `256mb`
+- **Always on**: `auto_stop_machines = false`, `min_machines_running = 1`
+- **Port**: 8081
+
+### Required Secrets
+
+```bash
+fly secrets set \
+  SUPABASE_URL="https://xxx.supabase.co" \
+  SUPABASE_SERVICE_ROLE_KEY="eyJ..." \
+  ROUTER_SERVICE_KEY="your-random-secret"
+```
