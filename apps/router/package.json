@@ -14,7 +14,8 @@
   "dependencies": {
     "@hono/node-server": "latest",
     "@supabase/supabase-js": "latest",
-    "hono": "latest"
+    "hono": "latest",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@agentbay/config": "workspace:*",
