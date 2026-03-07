@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
 
   const { data: messages, error } = await db
     .from('channel_messages')
-    .select('id, sender_id, content, message_kind, created_at, members!sender_id(display_name, type)')
+    .select('id, sender_id, content, message_kind, created_at, members!sender_id(display_name, instance_id)')
     .eq('channel_id', channelId)
     .order('created_at', { ascending: false })
     .limit(limit)
@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
     id: m.id,
     senderId: m.sender_id,
     senderName: m.members?.display_name ?? 'Unknown',
-    senderType: m.members?.type ?? 'unknown',
+    senderType: m.members?.instance_id ? 'agent' : 'user',
     content: m.content,
     kind: m.message_kind,
     createdAt: m.created_at,

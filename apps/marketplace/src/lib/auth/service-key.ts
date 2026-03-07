@@ -41,8 +41,8 @@ export async function authenticateAgent(req: NextRequest): Promise<
     return { ok: false, error: 'Member not found in project', status: 403 }
   }
 
-  if (member.status !== 'active') {
-    return { ok: false, error: 'Member is not active', status: 403 }
+  if (member.status === 'archived') {
+    return { ok: false, error: 'Member is archived', status: 403 }
   }
 
   return { ok: true, memberId, projectId }
