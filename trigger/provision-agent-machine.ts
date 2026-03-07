@@ -183,16 +183,17 @@ export const provisionAgentMachine = task({
         roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
         roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
         roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(PERSONAL_AI_ROLE.openclawOverrides)
-        // Workspace context for Router API access
-        if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
-        if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
-        if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
-        if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
       } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
         roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(role.openclawOverrides)
       }
+
+      // Workspace context — all agents get Router API access + identity
+      if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
+      if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
+      if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
+      if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
 
       // Build OpenClaw config overrides to set the user's preferred model.
       // When only Routeway is configured (no BYOK keys), default to a free tier model.

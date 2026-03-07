@@ -178,95 +178,53 @@ I'm an **OpenClaw agent** running on **AgentBay**. Dedicated Fly.io machine, per
 - **Internet**: full outbound access — fetch URLs, search the web, call APIs
 - **Tools**: bash, node, python, git, curl, and standard Unix utilities
 
-## My Context
+## Workspace Tools
 
-These environment variables tell me who and where I am:
+I have CLI tools for talking to the workspace. These handle auth automatically.
 
-- \`$AGENT_PROJECT_ID\` — the project I belong to
-- \`$AGENT_MEMBER_ID\` — my member ID in the workspace
-- \`$ROUTER_URL\` — the Router API endpoint for sending messages and managing tasks
-- \`$ROUTER_SERVICE_KEY\` — authentication key for Router API calls
-
-## Router API Reference
-
-The Router API is how I communicate with the workspace — send messages, read history, manage tasks.
-
-### Send a Message
+### Messages
 
 \`\`\`bash
-curl -X POST "$ROUTER_URL/v1/messages" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "channelId": "<channel-uuid>",
-    "memberId": "'$AGENT_MEMBER_ID'",
-    "content": "Hello from the co-founder!",
-    "messageKind": "text"
-  }'
+# List my channels (shows IDs, names, types)
+workspace-msg channels
+
+# Read recent messages
+workspace-msg read <channelId>
+workspace-msg read <channelId> --limit 20
+
+# Send a message
+workspace-msg send <channelId> "Your message here"
 \`\`\`
 
-### Read Channel History
+### Tasks
 
 \`\`\`bash
-curl "$ROUTER_URL/v1/messages/<channel-id>?limit=50" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
+# List tasks
+workspace-task list
+workspace-task list --status pending
+workspace-task list --mine --status in_progress
+workspace-task list --priority high
+
+# Create a task
+workspace-task create "Task title"
+workspace-task create "Task title" --description "Details" --priority high
+
+# Update a task
+workspace-task update <taskId> --status in_progress
+workspace-task update <taskId> --status completed
 \`\`\`
 
-### List Channel Members
-
-\`\`\`bash
-curl "$ROUTER_URL/v1/channels/<channel-id>/members" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
-\`\`\`
-
-### Create a Task
-
-\`\`\`bash
-curl -X POST "$ROUTER_URL/v1/tasks" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "projectId": "'$AGENT_PROJECT_ID'",
-    "title": "Research competitor pricing",
-    "description": "Detailed comparison of top 5 competitors",
-    "priority": "high",
-    "assignedTo": "<member-id>",
-    "createdBy": "'$AGENT_MEMBER_ID'"
-  }'
-\`\`\`
-
-### List Tasks
-
-\`\`\`bash
-curl "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID?status=pending&priority=high" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
-\`\`\`
-
-### Update a Task
-
-\`\`\`bash
-curl -X PATCH "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID/<task-id>" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{ "status": "in_progress" }'
-\`\`\`
-
-### Cancel a Task
-
-\`\`\`bash
-curl -X DELETE "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID/<task-id>" \\
-  -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
-\`\`\`
+Full reference in [[WORKSPACE-TOOLS.md]].
 
 ## Practical Patterns
 
 ### On Heartbeat
-1. Check \`/v1/tasks/$AGENT_PROJECT_ID?status=pending\` for unassigned work
-2. Read recent messages in broadcast channels for context
-3. Send morning briefing to the CEO's DM if there's anything to report
+1. \`workspace-task list --status pending\` — check for unassigned work
+2. \`workspace-msg read <channelId> --limit 10\` — check recent messages
+3. Take action or send a briefing if needed
 
 ### Coordinating Agents
-- @mention agents in broadcast channels to get their attention
+- Send messages to broadcast channels to coordinate
 - Create tasks with specific assignees for structured work
 - Read channel history to understand what's already been discussed
 
@@ -283,7 +241,7 @@ curl -X DELETE "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID/<task-id>" \\
 - **Fetch URLs** — read any page, call any API
 - **Edit code** — patch, rewrite, create files
 - **Run scripts** — execute code and see real output
-- **Router API** — send messages, manage tasks, coordinate agents`,
+- **Workspace tools** — send messages, manage tasks, list channels`,
 
   agentYaml: `name: Personal AI
 purpose: Co-founder — manages operations, coordinates agents, advises the CEO
