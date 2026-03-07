@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@agentbay/db/server'
 import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
+import { ensureCoFounderHired } from '@/lib/workspace/co-founder'
 
 export interface ProjectAgentInstance {
   id: string
@@ -26,7 +27,7 @@ async function ensureCorporation(userId: string) {
   // Check for existing corporations
   const { data: corps } = await service
     .from('corporations')
-    .select('id, name')
+    .select('id, name, co_founder_instance_id')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
 
@@ -38,14 +39,14 @@ async function ensureCorporation(userId: string) {
   const { data: newCorp } = await service
     .from('corporations')
     .insert({ user_id: userId, name: 'My Corporation', description: 'Your personal corporation' })
-    .select('id, name')
+    .select('id, name, co_founder_instance_id')
     .single()
 
   if (!newCorp) {
     // Race condition — another request created it
     const { data: fallback } = await service
       .from('corporations')
-      .select('id, name')
+      .select('id, name, co_founder_instance_id')
       .eq('user_id', userId)
       .order('created_at', { ascending: true })
       .limit(1)
@@ -125,7 +126,18 @@ export async function getActiveProjectId(userId: string) {
     }
   }
 
-  return { corporations, corporationId, projects: userProjects, activeProjectId, userMemberId }
+  // 6. Auto-hire co-founder (idempotent — fast after first run)
+  let coFounderInstanceId: string | null = corporations[0]?.co_founder_instance_id ?? null
+  if (activeProjectId && userMemberId && !coFounderInstanceId) {
+    try {
+      const result = await ensureCoFounderHired(userId, corporationId, activeProjectId, userMemberId)
+      coFounderInstanceId = result.instanceId
+    } catch (e) {
+      console.error('[workspace] co-founder auto-hire failed:', e)
+    }
+  }
+
+  return { corporations, corporationId, projects: userProjects, activeProjectId, userMemberId, coFounderInstanceId }
 }
 
 /**

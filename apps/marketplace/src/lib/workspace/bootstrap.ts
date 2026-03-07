@@ -117,11 +117,20 @@ export async function ensureWorkspaceBootstrapped(
   // 4. Backfill: agent_instances without corresponding members
   const { data: instances } = await service
     .from('agent_instances')
-    .select('id, display_name, agents!inner(name)')
+    .select('id, display_name, agents!inner(name, slug)')
     .eq('user_id', userId)
     .not('status', 'in', '("destroyed","destroying")')
 
   if (instances && instances.length > 0) {
+    // Detect co-founder instance for rank assignment
+    const { data: corp } = await service
+      .from('corporations')
+      .select('co_founder_instance_id')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle()
+    const coFounderInstanceId = corp?.co_founder_instance_id ?? null
+
     // Get existing members for this project that have instance_ids
     const { data: existingMembers } = await service
       .from('members')
@@ -138,8 +147,9 @@ export async function ensureWorkspaceBootstrapped(
       if (existingInstanceIds.has(inst.id)) continue
 
       const agentName = inst.display_name ?? (inst.agents as any)?.name ?? 'Agent'
+      const rank = inst.id === coFounderInstanceId ? 'master' : 'worker'
       try {
-        const { memberId } = await createAgentMember(projectId, inst.id, agentName)
+        const { memberId } = await createAgentMember(projectId, inst.id, agentName, rank)
         await createDMChannel(projectId, userMemberId, memberId, agentName)
         await joinBroadcastChannels(projectId, memberId)
       } catch (e) {
