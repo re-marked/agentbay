@@ -12,19 +12,30 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
   const user = await getUser()
   if (!user) redirect('/login')
 
-  const { projects, activeProjectId } = await getActiveProjectId(user.id)
+  const { corporations, projects, activeProjectId, coFounderInstanceId } =
+    await getActiveProjectId(user.id)
 
   // Run both queries in parallel — each is now a single DB round-trip
   const [instances, chats] = await Promise.all([
     getProjectAgents(user.id, activeProjectId),
     getProjectChats(user.id, activeProjectId),
   ])
-  const agents = toAgentInfoList(instances)
+  const allAgents = toAgentInfoList(instances)
+
+  // Separate co-founder from regular agents
+  const coFounder = coFounderInstanceId
+    ? allAgents.find(a => a.instanceId === coFounderInstanceId) ?? null
+    : null
+  const agents = coFounder
+    ? allAgents.filter(a => a.instanceId !== coFounderInstanceId)
+    : allAgents
 
   return (
     <SidebarProvider className="h-svh !min-h-0">
       <AppSidebar
         userEmail={user.email}
+        corporationName={corporations[0]?.name}
+        coFounder={coFounder}
         agents={agents}
         chats={chats}
         projects={projects}
