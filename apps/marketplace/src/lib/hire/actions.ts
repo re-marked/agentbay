@@ -72,24 +72,52 @@ export async function hireAgent({ agentSlug }: HireAgentParams) {
     .eq('agent_id', agent.id)
     .in('status', ['destroyed', 'destroying'])
 
-  // 3. Ensure project exists
+  // 3. Ensure corporation + project exist
+  let { data: corp } = await service
+    .from('corporations')
+    .select('id')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!corp) {
+    const { data: newCorp } = await service
+      .from('corporations')
+      .insert({ user_id: user.id, name: 'My Corporation' })
+      .select('id')
+      .single()
+    corp = newCorp
+  }
+
   const { data: existingProject } = await service
     .from('projects')
     .select('id')
     .eq('user_id', user.id)
     .eq('name', 'My Workspace')
     .limit(1)
-    .single()
+    .maybeSingle()
 
   let projectId = existingProject?.id
 
   if (!projectId) {
     const { data: newProject } = await service
       .from('projects')
-      .insert({ user_id: user.id, name: 'My Workspace' })
+      .insert({
+        user_id: user.id,
+        name: 'My Workspace',
+        corporation_id: corp?.id ?? null,
+      })
       .select('id')
       .single()
     projectId = newProject?.id
+  } else if (corp && !existingProject) {
+    // Link orphan project to corporation
+    await service
+      .from('projects')
+      .update({ corporation_id: corp.id })
+      .eq('id', projectId)
+      .is('corporation_id', null)
   }
 
   if (!projectId) return { error: 'Failed to create project' } as const
