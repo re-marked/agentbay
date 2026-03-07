@@ -26,6 +26,7 @@ export interface ProjectInfo {
 }
 
 interface WorkspaceSwitcherProps {
+  corporationName?: string
   projects: ProjectInfo[]
   activeProjectId: string | null
   userEmail?: string
@@ -44,7 +45,7 @@ function getProjectColor(index: number) {
   return PROJECT_COLORS[index % PROJECT_COLORS.length]
 }
 
-export function WorkspaceSwitcher({ projects, activeProjectId, userEmail }: WorkspaceSwitcherProps) {
+export function WorkspaceSwitcher({ corporationName, projects, activeProjectId, userEmail }: WorkspaceSwitcherProps) {
   const router = useRouter()
   const active = projects.find((p) => p.id === activeProjectId) ?? projects[0]
   const [creating, setCreating] = useState(false)
@@ -97,8 +98,11 @@ export function WorkspaceSwitcher({ projects, activeProjectId, userEmail }: Work
                 <FolderKanban className="size-4" />
               </div>
               <div className="flex flex-1 flex-col gap-0.5 leading-none">
-                <span className="font-medium truncate">{active.name}</span>
-                {active.description && (
+                <span className="font-medium truncate">{corporationName ?? active.name}</span>
+                {corporationName && (
+                  <span className="text-[11px] text-sidebar-foreground/40 truncate">{active.name}</span>
+                )}
+                {!corporationName && active.description && (
                   <span className="text-[11px] text-sidebar-foreground/40 truncate">{active.description}</span>
                 )}
               </div>
@@ -117,9 +121,9 @@ export function WorkspaceSwitcher({ projects, activeProjectId, userEmail }: Work
                   <FolderKanban className="size-5" />
                 </div>
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-sm font-semibold">{active.name}</span>
+                  <span className="text-sm font-semibold">{corporationName ?? active.name}</span>
                   <span className="text-xs text-muted-foreground">
-                    {active.description ?? 'Personal project'}
+                    {corporationName ? active.name : (active.description ?? 'Personal project')}
                   </span>
                 </div>
               </div>
@@ -192,7 +196,7 @@ export function WorkspaceSwitcher({ projects, activeProjectId, userEmail }: Work
                   }}
                 >
                   <Plus className="size-4" />
-                  <span className="text-sm">New workspace</span>
+                  <span className="text-sm">New project</span>
                 </DropdownMenuItem>
               )}
             </div>

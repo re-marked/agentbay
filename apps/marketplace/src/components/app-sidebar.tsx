@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Home, Settings, Plus, BarChart3, Key, Sparkles, MoreHorizontal, Pencil, Trash2, CompassIcon, Hash } from "lucide-react"
+import { Home, Settings, Plus, BarChart3, Key, Sparkles, MoreHorizontal, Pencil, Trash2, CompassIcon, Hash, ListTodo } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 
@@ -50,6 +50,8 @@ interface ChatInfo {
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   userEmail?: string
+  corporationName?: string
+  coFounder?: AgentInfo | null
   agents?: AgentInfo[]
   chats?: ChatInfo[]
   projects?: ProjectInfo[]
@@ -75,6 +77,8 @@ const STATUS_DOT: Record<string, string> = {
 
 export function AppSidebar({
   userEmail,
+  corporationName,
+  coFounder = null,
   agents = [],
   chats = [],
   projects = [],
@@ -159,11 +163,11 @@ export function AppSidebar({
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>
       <SidebarHeader>
-        <WorkspaceSwitcher projects={projects} activeProjectId={activeProjectId} userEmail={userEmail} />
+        <WorkspaceSwitcher corporationName={corporationName} projects={projects} activeProjectId={activeProjectId} userEmail={userEmail} />
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Home + Discover */}
+        {/* Navigation */}
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -172,6 +176,14 @@ export function AppSidebar({
                   <Link href="/workspace/home">
                     <Home className="size-4" />
                     <span>Home</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === "/workspace/tasks"}>
+                  <Link href="/workspace/tasks">
+                    <ListTodo className="size-4" />
+                    <span>Tasks</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -194,6 +206,41 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* Co-Founder */}
+        {coFounder && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Co-Founder</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith(`/workspace/dm/${coFounder.instanceId}`)}
+                    className="gap-2.5 border-l-2 border-primary bg-primary/[0.04]"
+                  >
+                    <Link href={`/workspace/dm/${coFounder.instanceId}`}>
+                      <AgentProfileCard
+                        instanceId={coFounder.instanceId}
+                        name={coFounder.name}
+                        category={coFounder.category}
+                        status={coFounder.status}
+                        iconUrl={coFounder.iconUrl}
+                        tagline={coFounder.tagline}
+                      >
+                        <span className="relative flex shrink-0">
+                          <AgentAvatar name={coFounder.name} category={coFounder.category} iconUrl={coFounder.iconUrl} size="xs" />
+                          <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-sidebar bg-status-running" />
+                        </span>
+                      </AgentProfileCard>
+                      <span className="truncate">{coFounder.name}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {/* Your Agents */}
         <SidebarGroup>
@@ -244,7 +291,7 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Direct Messages */}
+        {/* Direct Messages (minus co-founder) */}
         <SidebarGroup>
           <SidebarGroupLabel>Direct Messages</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -279,7 +326,7 @@ export function AppSidebar({
                 )
               })}
 
-              {agents.length === 0 && (
+              {agents.length === 0 && !coFounder && (
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild>
                     <Link href="/discover" className="text-muted-foreground">
@@ -293,9 +340,9 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Group Chats */}
+        {/* Channels */}
         <SidebarGroup>
-          <SidebarGroupLabel>Group Chats</SidebarGroupLabel>
+          <SidebarGroupLabel>Channels</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {chats.map((chat) => {
@@ -360,7 +407,7 @@ export function AppSidebar({
                 )
               })}
 
-              {/* New chat inline input */}
+              {/* New channel inline input */}
               {isCreating ? (
                 <SidebarMenuItem>
                   <div className="flex items-center gap-2 px-2 py-1">
@@ -394,7 +441,7 @@ export function AppSidebar({
                     className="text-muted-foreground"
                   >
                     <Plus className="size-4" />
-                    <span>New Chat</span>
+                    <span>New Channel</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
