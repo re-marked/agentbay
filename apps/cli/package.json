@@ -7,7 +7,7 @@
     "agentbay": "./dist/index.js"
   },
   "scripts": {
-    "dev": "node --disable-warning=ExperimentalWarning --import tsx/esm src/index.ts",
+    "dev": "tsx src/index.ts",
     "build": "tsup src/index.ts --format esm --dts",
     "lint": "eslint src/",
     "type-check": "tsc --noEmit"

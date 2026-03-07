@@ -133,8 +133,8 @@ function provisionAuth(workspacePath: string): void {
 // ── Port check ───────────────────────────────────────────────
 
 /**
- * Check if a usable OpenClaw gateway is already running on a port.
- * Sends a real request with auth token if available.
+ * Check if an OpenClaw gateway on this port accepts our auth.
+ * 401/403 = alive but wrong credentials. Anything else = usable.
  */
 async function isGatewayUsable(port: number): Promise<boolean> {
   try {
@@ -147,9 +147,12 @@ async function isGatewayUsable(port: number): Promise<boolean> {
         stream: false,
         max_tokens: 1,
       }),
-      signal: AbortSignal.timeout(3_000),
+      signal: AbortSignal.timeout(5_000),
     });
-    return res.ok;
+    // 401/403 means auth rejected — we can't use this gateway
+    if (res.status === 401 || res.status === 403) return false;
+    // Anything else (200, 400, 404, etc.) means auth passed
+    return true;
   } catch {
     return false;
   }
@@ -236,11 +239,13 @@ export function createLocalAgentManager(): AgentManager {
 
       // Collect stderr for error reporting
       let stderrBuf = "";
+      let childExited = false;
       child.stderr?.on("data", (data: Buffer) => {
         stderrBuf += data.toString();
       });
 
       child.on("exit", (code) => {
+        childExited = true;
         processes.delete(agent.memberId);
         if (code !== 0 && code !== null) {
           console.error(`[${config.name}] exited with code ${code}`);
@@ -256,7 +261,42 @@ export function createLocalAgentManager(): AgentManager {
       console.log(
         `[${config.name}] spawning on port ${port}... (this takes ~60s)`
       );
-      await waitForReady(port, STARTUP_TIMEOUT_MS);
+
+      // Wait for ready, but abort if the child dies
+      const start = Date.now();
+      while (Date.now() - start < STARTUP_TIMEOUT_MS) {
+        if (childExited) {
+          throw new Error(
+            `[${config.name}] process exited before becoming ready. ` +
+            `Is another gateway already running? Try: openclaw gateway stop`
+          );
+        }
+        try {
+          const res = await fetch(`http://localhost:${port}/v1/chat/completions`, {
+            method: "POST",
+            headers: gatewayHeaders(),
+            body: JSON.stringify({
+              model: "default",
+              messages: [{ role: "user", content: "ping" }],
+              stream: false,
+              max_tokens: 1,
+            }),
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (res.ok || res.status < 500) break;
+        } catch {
+          // not ready yet
+        }
+        await new Promise((r) => setTimeout(r, HEALTH_INTERVAL_MS));
+      }
+
+      if (childExited) {
+        throw new Error(
+          `[${config.name}] process exited before becoming ready. ` +
+          `Is another gateway already running? Try: openclaw gateway stop`
+        );
+      }
+
       console.log(`[${config.name}] ready on port ${port}`);
 
       return agent;
