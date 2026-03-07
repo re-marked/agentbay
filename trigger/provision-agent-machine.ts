@@ -152,7 +152,21 @@ export const provisionAgentMachine = task({
       await allocatePublicIPs(appName)
       logger.info('Fly app ready with IPs', { appName: app.name })
 
-      // ── 4. Clean up orphaned volumes then create a fresh one ──────────────
+      // ── 4. Clean up orphaned machines and volumes ──────────────────────────
+      // On retry after partial success, a machine from the previous attempt may
+      // still be running with a different gateway token. Destroy all existing
+      // machines so the new one is the sole instance (prevents load-balancing
+      // between machines with different tokens → "Unauthorized" errors).
+      const existingMachines = await fly.listMachines(appName)
+      for (const m of existingMachines) {
+        try {
+          await fly.deleteMachine(appName, m.id, true)
+          logger.info('Destroyed orphaned machine', { machineId: m.id, state: m.state })
+        } catch (err) {
+          logger.warn('Failed to destroy orphaned machine', { machineId: m.id, error: String(err) })
+        }
+      }
+
       // Orphaned volumes are pinned to hosts that may be full, causing 412
       // "insufficient resources" errors. Delete them so Fly picks a healthy host.
       const existingVolumes = await fly.listVolumes(appName)
