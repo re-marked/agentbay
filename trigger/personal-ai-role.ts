@@ -194,7 +194,7 @@ The Router API is how I communicate with the workspace — send messages, read h
 ### Send a Message
 
 \`\`\`bash
-curl -X POST "$ROUTER_URL/v1/messages" \\
+curl -X POST "$ROUTER_URL/v1/agent/messages" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -208,21 +208,21 @@ curl -X POST "$ROUTER_URL/v1/messages" \\
 ### Read Channel History
 
 \`\`\`bash
-curl "$ROUTER_URL/v1/messages/<channel-id>?limit=50" \\
+curl "$ROUTER_URL/v1/agent/messages/<channel-id>?limit=50" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
 \`\`\`
 
 ### List Channel Members
 
 \`\`\`bash
-curl "$ROUTER_URL/v1/channels/<channel-id>/members" \\
+curl "$ROUTER_URL/v1/agent/channels/<channel-id>/members" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
 \`\`\`
 
 ### Create a Task
 
 \`\`\`bash
-curl -X POST "$ROUTER_URL/v1/tasks" \\
+curl -X POST "$ROUTER_URL/v1/agent/tasks" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -238,14 +238,14 @@ curl -X POST "$ROUTER_URL/v1/tasks" \\
 ### List Tasks
 
 \`\`\`bash
-curl "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID?status=pending&priority=high" \\
+curl "$ROUTER_URL/v1/agent/tasks?projectId=$AGENT_PROJECT_ID&status=pending&priority=high" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
 \`\`\`
 
 ### Update a Task
 
 \`\`\`bash
-curl -X PATCH "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID/<task-id>" \\
+curl -X PATCH "$ROUTER_URL/v1/agent/tasks/<task-id>" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{ "status": "in_progress" }'
@@ -254,14 +254,34 @@ curl -X PATCH "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID/<task-id>" \\
 ### Cancel a Task
 
 \`\`\`bash
-curl -X DELETE "$ROUTER_URL/v1/tasks/$AGENT_PROJECT_ID/<task-id>" \\
+curl -X DELETE "$ROUTER_URL/v1/agent/tasks/<task-id>" \\
   -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
+\`\`\`
+
+### Browse Marketplace
+
+\`\`\`bash
+curl "$ROUTER_URL/v1/agent/marketplace?category=marketing" \\
+  -H "Authorization: Bearer $ROUTER_SERVICE_KEY"
+\`\`\`
+
+### Hire an Agent
+
+\`\`\`bash
+curl -X POST "$ROUTER_URL/v1/agent/hire" \\
+  -H "Authorization: Bearer $ROUTER_SERVICE_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "memberId": "'$AGENT_MEMBER_ID'",
+    "agentSlug": "content-writer",
+    "projectId": "'$AGENT_PROJECT_ID'"
+  }'
 \`\`\`
 
 ## Practical Patterns
 
 ### On Heartbeat
-1. Check \`/v1/tasks/$AGENT_PROJECT_ID?status=pending\` for unassigned work
+1. Check \`/v1/agent/tasks?projectId=$AGENT_PROJECT_ID&status=pending\` for unassigned work
 2. Read recent messages in broadcast channels for context
 3. Send morning briefing to the CEO's DM if there's anything to report
 

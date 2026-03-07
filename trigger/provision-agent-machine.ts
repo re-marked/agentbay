@@ -176,18 +176,19 @@ export const provisionAgentMachine = task({
       logger.info('Volume created', { volumeId: volume.id })
 
       // ── 5. Create machine ─────────────────────────────────────────────────
+      // ── 5a. Workspace context — ALL agents get Router API access ─────────
       const roleEnv: Record<string, string> = {}
+      if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
+      if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
+      if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
+      if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
+
       if (isCoFounder) {
         roleEnv.AGENT_SOUL_MD = PERSONAL_AI_ROLE.soul
         roleEnv.AGENT_WHOAMI_MD = PERSONAL_AI_ROLE.whoami
         roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
         roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
         roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(PERSONAL_AI_ROLE.openclawOverrides)
-        // Workspace context for Router API access
-        if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
-        if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
-        if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
-        if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
       } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
