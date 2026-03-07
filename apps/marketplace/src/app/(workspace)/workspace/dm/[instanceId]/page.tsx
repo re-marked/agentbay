@@ -2,6 +2,7 @@ import { getUser } from '@/lib/auth/get-user'
 import { createServiceClient } from '@agentbay/db/server'
 import { redirect } from 'next/navigation'
 import { DiscordChatPanel } from '@/components/discord-chat-panel'
+import { ProvisioningWaitScreen } from '@/components/provisioning-wait-screen'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { AgentAvatar } from '@/lib/agents'
@@ -23,7 +24,7 @@ export default async function DirectMessagePage({
     .select('id, status, display_name, agents!inner(name, category, icon_url)')
     .eq('id', instanceId)
     .eq('user_id', user.id)
-    .in('status', ['running', 'suspended', 'stopped'])
+    .in('status', ['running', 'suspended', 'stopped', 'provisioning'])
     .limit(1)
     .single()
 
@@ -33,6 +34,7 @@ export default async function DirectMessagePage({
     name: string; category: string; icon_url: string | null
   }
   const agentName = instance.display_name ?? agent.name
+  const isProvisioning = instance.status === 'provisioning'
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -62,13 +64,17 @@ export default async function DirectMessagePage({
         <span className="text-sm font-medium truncate">{agentName}</span>
       </header>
 
-      <DiscordChatPanel
-        agentInstanceId={instance.id}
-        agentName={agentName}
-        agentCategory={agent.category}
-        agentIconUrl={agent.icon_url}
-        agentStatus={instance.status}
-      />
+      {isProvisioning ? (
+        <ProvisioningWaitScreen instanceId={instance.id} agentName={agentName} />
+      ) : (
+        <DiscordChatPanel
+          agentInstanceId={instance.id}
+          agentName={agentName}
+          agentCategory={agent.category}
+          agentIconUrl={agent.icon_url}
+          agentStatus={instance.status}
+        />
+      )}
     </div>
   )
 }
