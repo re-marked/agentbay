@@ -4,7 +4,7 @@ import { FlyClient } from '@agentbay/fly'
 
 export const healthCheckMachines = schedules.task({
   id: 'health-check-machines',
-  cron: '*/5 * * * *', // every 5 minutes
+  cron: '*/30 * * * *', // every 30 minutes
   maxDuration: 120,
 
   run: async () => {

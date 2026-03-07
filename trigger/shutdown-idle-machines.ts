@@ -2,11 +2,11 @@ import { schedules, logger } from '@trigger.dev/sdk/v3'
 import { createServiceClient } from '@agentbay/db'
 import { FlyClient } from '@agentbay/fly'
 
-const IDLE_THRESHOLD_HOURS = 2
+const IDLE_THRESHOLD_HOURS = 72 // 3 days — at current scale, cold starts hurt more than costs
 
 export const shutdownIdleMachines = schedules.task({
   id: 'shutdown-idle-machines',
-  cron: '0 * * * *', // every hour
+  cron: '0 */6 * * *', // every 6 hours
   maxDuration: 120,
 
   run: async () => {

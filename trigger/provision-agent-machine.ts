@@ -226,7 +226,7 @@ export const provisionAgentMachine = task({
                 { port: 443, handlers: ['tls', 'http'] },
                 { port: 80, handlers: ['http'] },
               ],
-              autostop: 'suspend',
+              autostop: 'off',
               autostart: true,
               min_machines_running: 0,
               checks: [
