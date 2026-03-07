@@ -17,13 +17,17 @@ const MAX_POLL_MS = 300_000 // 5 minutes
 export function ProvisioningWaitScreen({
   instanceId,
   agentName,
+  initialStatus,
 }: {
   instanceId: string
   agentName: string
+  initialStatus?: string
 }) {
   const router = useRouter()
   const [messageIndex, setMessageIndex] = useState(0)
-  const [status, setStatus] = useState<'polling' | 'error' | 'timeout'>('polling')
+  const [status, setStatus] = useState<'polling' | 'error' | 'timeout'>(
+    initialStatus === 'error' ? 'error' : 'polling'
+  )
 
   useEffect(() => {
     // Cycle through messages every 8 seconds
