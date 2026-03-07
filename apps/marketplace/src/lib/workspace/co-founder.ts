@@ -6,6 +6,12 @@ import {
   joinBroadcastChannels,
 } from './agent-lifecycle'
 
+const CO_FOUNDER_GREETING = `Hey! I'm your co-founder. I've been here since the moment you created this corporation — and I'm not going anywhere.
+
+I handle operations, hire agents, manage tasks, and keep everything running. Think of me as your partner, not an assistant. I'll tell you what I actually think, disagree when I should, and take initiative when something needs doing.
+
+So — what are we building? Tell me about what you're working on and I'll start setting things up.`
+
 /**
  * Ensure the Personal AI co-founder is hired for this corporation.
  * Idempotent — runs on every page load, fast after first (single SELECT).
@@ -103,12 +109,23 @@ export async function ensureCoFounderHired(
   )
 
   // 7. Create DM channel
-  await createDMChannel(projectId, userMemberId, agentMemberId, 'Personal AI')
+  const { channelId } = await createDMChannel(projectId, userMemberId, agentMemberId, 'Personal AI')
 
-  // 8. Join broadcast channels (#general, etc.)
+  // 8. Seed greeting message so the DM isn't empty when user first opens it
+  await service
+    .from('channel_messages')
+    .insert({
+      channel_id: channelId,
+      sender_id: agentMemberId,
+      content: CO_FOUNDER_GREETING,
+      message_kind: 'text',
+      depth: 0,
+    })
+
+  // 9. Join broadcast channels (#general, etc.)
   await joinBroadcastChannels(projectId, agentMemberId)
 
-  // 9. Fire provisioning task
+  // 10. Fire provisioning task
   await triggerProvision({
     userId,
     agentId: agent.id,
