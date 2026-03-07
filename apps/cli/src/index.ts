@@ -58,7 +58,24 @@ async function chatLoop(
 
   console.log('\nType a message. Press Ctrl+C to exit.\n');
 
+  let processing = false;
+  let closing = false;
+
+  const exit = () => {
+    console.log("\nGoodbye.");
+    cleanupAllAgents();
+    // Use setTimeout to let libuv drain handles before exiting
+    setTimeout(() => process.exit(0), 50);
+  };
+
+  rl.on("close", () => {
+    closing = true;
+    if (!processing) exit();
+  });
+
   const prompt = () => {
+    if (closing) { exit(); return; }
+
     rl.question("you > ", async (input) => {
       const trimmed = input.trim();
       if (!trimmed) {
@@ -66,6 +83,7 @@ async function chatLoop(
         return;
       }
 
+      processing = true;
       try {
         process.stdout.write("\nco-founder > ");
         await sendMessage(channelId, senderId, trimmed, deps);
@@ -76,6 +94,7 @@ async function chatLoop(
           err instanceof Error ? err.message : err
         );
       }
+      processing = false;
 
       prompt();
     });
@@ -131,8 +150,8 @@ program
       if (!projectId) {
         // SQLite store doesn't have a listProjects method yet,
         // so we read directly for now
-        const Database = (await import("better-sqlite3")).default;
-        const db = new Database(DB_PATH, { readonly: true });
+        const { DatabaseSync } = await import("node:sqlite");
+        const db = new DatabaseSync(DB_PATH, { readOnly: true });
         const row = db
           .prepare(
             "SELECT id FROM projects ORDER BY created_at DESC LIMIT 1"
@@ -167,8 +186,8 @@ program
   .action(async () => {
     const deps = createDeps();
 
-    const Database = (await import("better-sqlite3")).default;
-    const db = new Database(DB_PATH, { readonly: true });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
     const projects = db
       .prepare("SELECT * FROM projects ORDER BY created_at DESC")
       .all() as Array<{ id: string; name: string; created_at: string }>;

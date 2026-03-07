@@ -85,7 +85,8 @@ export async function initCorporation(
     processId: cofounderProcess.pid,
   });
 
-  // Update process with real member ID
+  // Update process mapping with real member ID
+  agents.updateMemberId(cofounderProcess.memberId, cofounder.id);
   cofounderProcess.memberId = cofounder.id;
 
   // Set as project master
@@ -153,6 +154,7 @@ export async function resumeCorporation(
     port: 18789,
     rank: "master",
   });
+  agents.updateMemberId(cofounderProcess.memberId, cofounder.id);
   cofounderProcess.memberId = cofounder.id;
 
   // Update process ID in DB

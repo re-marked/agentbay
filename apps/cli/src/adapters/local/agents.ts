@@ -20,11 +20,45 @@ const KILL_GRACE_MS = 5_000;
 /** Track all running agent processes for cleanup */
 const processes = new Map<
   string,
-  { child: ChildProcess; agent: AgentProcess; history: Array<{ role: string; content: string }> }
+  { child: ChildProcess | null; agent: AgentProcess; history: Array<{ role: string; content: string }> }
 >();
 
 /** Next available port — increments per spawn */
 let nextPort = 18789;
+
+/** Cached gateway auth token (read from ~/.openclaw/openclaw.json) */
+let gatewayAuthToken: string | null = null;
+
+// ── Gateway auth ────────────────────────────────────────────
+
+/**
+ * Read the gateway auth token from ~/.openclaw/openclaw.json.
+ * Returns null if no token is configured.
+ */
+function getGatewayAuthToken(): string | null {
+  if (gatewayAuthToken !== null) return gatewayAuthToken;
+
+  try {
+    const raw = readFileSync(join(OPENCLAW_HOME, "openclaw.json"), "utf-8");
+    const config = JSON.parse(raw);
+    gatewayAuthToken = config?.gateway?.auth?.token ?? null;
+  } catch {
+    gatewayAuthToken = null;
+  }
+  return gatewayAuthToken;
+}
+
+/**
+ * Build headers for gateway requests — includes auth token if available.
+ */
+function gatewayHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getGatewayAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 // ── Auth provisioning ───────────────────────────────────────
 
@@ -96,11 +130,35 @@ function provisionAuth(workspacePath: string): void {
   }
 }
 
+// ── Port check ───────────────────────────────────────────────
+
+/**
+ * Check if a usable OpenClaw gateway is already running on a port.
+ * Sends a real request with auth token if available.
+ */
+async function isGatewayUsable(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:${port}/v1/chat/completions`, {
+      method: "POST",
+      headers: gatewayHeaders(),
+      body: JSON.stringify({
+        model: "default",
+        messages: [{ role: "user", content: "ping" }],
+        stream: false,
+        max_tokens: 1,
+      }),
+      signal: AbortSignal.timeout(3_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Health check ────────────────────────────────────────────
 
 /**
  * Wait for OpenClaw gateway to be ready by sending a real chat completions request.
- * A simple /v1/models check isn't enough — the gateway may listen but not be ready.
  */
 async function waitForReady(port: number, timeoutMs: number): Promise<void> {
   const start = Date.now();
@@ -108,7 +166,7 @@ async function waitForReady(port: number, timeoutMs: number): Promise<void> {
     try {
       const res = await fetch(`http://localhost:${port}/v1/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: gatewayHeaders(),
         body: JSON.stringify({
           model: "default",
           messages: [{ role: "user", content: "ping" }],
@@ -117,7 +175,6 @@ async function waitForReady(port: number, timeoutMs: number): Promise<void> {
         }),
         signal: AbortSignal.timeout(5_000),
       });
-      // Any non-500 response means the server is accepting requests
       if (res.ok || res.status < 500) return;
     } catch {
       // not ready yet
@@ -140,9 +197,24 @@ export function createLocalAgentManager(): AgentManager {
       // Provision auth credentials from ~/.openclaw
       provisionAuth(absPath);
 
-      // `npx openclaw gateway run` with shell: true
-      // --force bypasses stale port locks
-      // OPENCLAW_STATE_DIR isolates state per agent
+      // Check if we can reuse an existing gateway on this port
+      if (await isGatewayUsable(port)) {
+        console.log(
+          `[${config.name}] found existing gateway on port ${port}, attaching`
+        );
+
+        const agent: AgentProcess = {
+          memberId: config.name,
+          pid: 0,
+          port,
+          baseUrl: `http://localhost:${port}`,
+        };
+
+        processes.set(agent.memberId, { child: null, agent, history: [] });
+        return agent;
+      }
+
+      // No usable gateway — spawn a new one
       const cmd = `npx openclaw gateway run --bind lan --port ${port} --allow-unconfigured --force`;
 
       const child = spawn(cmd, {
@@ -156,7 +228,7 @@ export function createLocalAgentManager(): AgentManager {
       });
 
       const agent: AgentProcess = {
-        memberId: config.name, // placeholder — orchestrator sets real ID
+        memberId: config.name,
         pid: child.pid!,
         port,
         baseUrl: `http://localhost:${port}`,
@@ -204,7 +276,7 @@ export function createLocalAgentManager(): AgentManager {
       // Stream the response for real-time output
       const res = await fetch(`${agent.baseUrl}/v1/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: gatewayHeaders(),
         body: JSON.stringify({
           model: "default",
           messages: entry.history,
@@ -263,19 +335,25 @@ export function createLocalAgentManager(): AgentManager {
       const entry = processes.get(agent.memberId);
       if (!entry) return;
 
+      // Don't kill attached (external) gateways
+      if (!entry.child) {
+        processes.delete(agent.memberId);
+        return;
+      }
+
       entry.child.kill("SIGTERM");
 
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
           try {
-            entry.child.kill("SIGKILL");
+            entry.child!.kill("SIGKILL");
           } catch {
             /* already dead */
           }
           resolve();
         }, KILL_GRACE_MS);
 
-        entry.child.on("exit", () => {
+        entry.child!.on("exit", () => {
           clearTimeout(timer);
           resolve();
         });
@@ -287,13 +365,22 @@ export function createLocalAgentManager(): AgentManager {
     isRunning(agent: AgentProcess): boolean {
       const entry = processes.get(agent.memberId);
       if (!entry) return false;
+      if (!entry.child) return true;
       return !entry.child.killed && entry.child.exitCode === null;
     },
 
     listRunning(): AgentProcess[] {
       return Array.from(processes.values())
-        .filter((e) => !e.child.killed && e.child.exitCode === null)
+        .filter((e) => !e.child || (!e.child.killed && e.child.exitCode === null))
         .map((e) => e.agent);
+    },
+
+    updateMemberId(oldId: string, newId: string): void {
+      const entry = processes.get(oldId);
+      if (!entry) return;
+      processes.delete(oldId);
+      entry.agent.memberId = newId;
+      processes.set(newId, entry);
     },
   };
 }
@@ -301,6 +388,7 @@ export function createLocalAgentManager(): AgentManager {
 /** Kill all running agents — call on process exit */
 export function cleanupAllAgents(): void {
   for (const [id, entry] of processes) {
+    if (!entry.child) continue;
     try {
       entry.child.kill("SIGTERM");
     } catch {

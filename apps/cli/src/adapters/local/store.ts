@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type { Store } from "../../core/interfaces.js";
 import type {
@@ -190,9 +190,9 @@ function rowToTeam(row: any): Team {
 // ── SQLite Store ─────────────────────────────────────────────
 
 export function createSqliteStore(dbPath: string): Store {
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  const db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
 
   return {

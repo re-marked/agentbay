@@ -118,6 +118,9 @@ export interface AgentManager {
 
   /** List all running agent processes */
   listRunning(): AgentProcess[];
+
+  /** Update the member ID mapping (called after DB member is created) */
+  updateMemberId(oldId: string, newId: string): void;
 }
 
 // ── Surface 3: Events ───────────────────────────────────────
