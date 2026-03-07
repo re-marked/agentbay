@@ -12,7 +12,7 @@ import {
 } from "./adapters/local/agents.js";
 import { createLocalEvents } from "./adapters/local/events.js";
 import { initCorporation, resumeCorporation } from "./core/orchestrator.js";
-import { sendMessage } from "./core/router.js";
+import { sendMessage } from "@agentbay/core";
 
 const AGENTBAY_HOME = join(homedir(), ".agentbay");
 const DB_PATH = join(AGENTBAY_HOME, "agentbay.db");

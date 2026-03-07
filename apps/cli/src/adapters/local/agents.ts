@@ -8,8 +8,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import type { AgentManager } from "../../core/interfaces.js";
-import type { AgentConfig, AgentProcess, Message } from "../../core/types.js";
+import type { AgentManager, AgentConfig, AgentProcess, Message } from "@agentbay/core";
 
 const OPENCLAW_HOME = join(homedir(), ".openclaw");
 const STARTUP_TIMEOUT_MS = 120_000; // OpenClaw gateway can take 50-60s

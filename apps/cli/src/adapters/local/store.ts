@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import type { Store } from "../../core/interfaces.js";
 import type {
+  Store,
   Project,
   Member,
   MemberStatus,
@@ -11,7 +11,7 @@ import type {
   TaskStatus,
   TaskPriority,
   Team,
-} from "../../core/types.js";
+} from "@agentbay/core";
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS projects (

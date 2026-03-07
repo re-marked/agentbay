@@ -13,6 +13,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentbay/core": "workspace:*",
     "commander": "^13.0.0"
   },
   "devDependencies": {

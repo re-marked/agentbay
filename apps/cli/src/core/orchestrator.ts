@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Store, AgentManager, Events } from "./interfaces.js";
-import type { AgentProcess, Project, Member, Channel } from "./types.js";
+import type { Store, AgentManager, Events, AgentProcess, Project, Member, Channel } from "@agentbay/core";
 
 export interface Corporation {
   project: Project;

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Events } from "../../core/interfaces.js";
+import type { Events } from "@agentbay/core";
 
 export function createLocalEvents(): Events {
   const emitter = new EventEmitter();
