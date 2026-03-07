@@ -2,6 +2,7 @@ import { task, logger } from '@trigger.dev/sdk/v3'
 import { createServiceClient } from '@agentbay/db'
 import { FlyClient } from '@agentbay/fly'
 import { AGENT_ROLES } from './agent-roles'
+import { PERSONAL_AI_ROLE } from './personal-ai-role'
 
 // v2026.2.34 trims SOUL.md + moves The Brain to BRAIN.md.
 // Never use :latest — fly deploy doesn't update it, so it's always stale.
@@ -14,6 +15,9 @@ export interface ProvisionPayload {
   agentId: string
   instanceId: string
   role?: string
+  projectId?: string    // Workspace context
+  memberId?: string     // Agent's member ID
+  isCoFounder?: boolean // Triggers Personal AI role
 }
 
 /**
@@ -75,7 +79,7 @@ export const provisionAgentMachine = task({
   },
 
   run: async (payload: ProvisionPayload) => {
-    const { userId, agentId, instanceId, role: roleId } = payload
+    const { userId, agentId, instanceId, role: roleId, isCoFounder, projectId, memberId } = payload
     const db = createServiceClient()
     const fly = new FlyClient()
 
@@ -133,10 +137,12 @@ export const provisionAgentMachine = task({
       }
 
       const image = agent.docker_image ?? BASE_IMAGE
-      // Sub-agents get named by role, master agents by slug
-      const appName = role
-        ? `ab-${role.id}-${userId.slice(0, 8)}`
-        : `ab-${agent.slug}-${userId.slice(0, 8)}`
+      // Co-founder gets special name, sub-agents by role, master agents by slug
+      const appName = isCoFounder
+        ? `ab-cofounder-${userId.slice(0, 8)}`
+        : role
+          ? `ab-${role.id}-${userId.slice(0, 8)}`
+          : `ab-${agent.slug}-${userId.slice(0, 8)}`
       const gatewayToken = crypto.randomUUID()
 
       logger.info('Provisioning agent machine', { appName, userId, agentId })
@@ -171,7 +177,18 @@ export const provisionAgentMachine = task({
 
       // ── 5. Create machine ─────────────────────────────────────────────────
       const roleEnv: Record<string, string> = {}
-      if (role) {
+      if (isCoFounder) {
+        roleEnv.AGENT_SOUL_MD = PERSONAL_AI_ROLE.soul
+        roleEnv.AGENT_WHOAMI_MD = PERSONAL_AI_ROLE.whoami
+        roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
+        roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
+        roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(PERSONAL_AI_ROLE.openclawOverrides)
+        // Workspace context for Router API access
+        if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
+        if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
+        if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
+        if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
+      } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
         roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(role.openclawOverrides)
