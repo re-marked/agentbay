@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await req.json()
-  const { title, description, priority = 'medium', assignedTo } = body
+  const { title, description, priority = 'normal', assignedTo } = body
 
   if (!title) {
     return NextResponse.json({ error: 'title is required' }, { status: 400 })

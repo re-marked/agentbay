@@ -28,7 +28,7 @@ case "${1:-}" in
     shift
     TITLE=""
     DESC=""
-    PRIORITY="medium"
+    PRIORITY="normal"
     ASSIGN=""
     while [ $# -gt 0 ]; do
       case "$1" in
