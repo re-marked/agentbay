@@ -1,12 +1,13 @@
 import { getUser } from '@/lib/auth/get-user'
 import { createServiceClient } from '@agentbay/db/server'
 import { redirect } from 'next/navigation'
-import { DiscordChatPanel } from '@/components/discord-chat-panel'
 import { ProvisioningWaitScreen } from '@/components/provisioning-wait-screen'
+import { ChannelChat } from '@/components/channel-chat'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { AgentAvatar } from '@/lib/agents'
 import { AgentProfileCard } from '@/components/agent-profile-card'
+import { getActiveProjectId } from '@/lib/projects/queries'
 
 export default async function DirectMessagePage({
   params,
@@ -35,6 +36,72 @@ export default async function DirectMessagePage({
   }
   const agentName = instance.display_name ?? agent.name
   const isNotReady = instance.status === 'provisioning' || instance.status === 'error'
+
+  // For running agents, look up the DM channel and member info
+  let channelId: string | null = null
+  let userMemberId: string | null = null
+  let membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }> = {}
+
+  if (!isNotReady) {
+    const { activeProjectId, userMemberId: uid } = await getActiveProjectId(user.id)
+    userMemberId = uid
+
+    if (activeProjectId && userMemberId) {
+      // Find agent's member in this project
+      const { data: agentMember } = await service
+        .from('members')
+        .select('id, display_name')
+        .eq('project_id', activeProjectId)
+        .eq('instance_id', instanceId)
+        .neq('status', 'archived')
+        .limit(1)
+        .maybeSingle()
+
+      if (agentMember) {
+        // Find DM channel between user and agent
+        const { data: agentChannels } = await service
+          .from('channel_members')
+          .select('channel_id')
+          .eq('member_id', agentMember.id)
+
+        if (agentChannels && agentChannels.length > 0) {
+          const { data: dmChannel } = await service
+            .from('channels')
+            .select('id')
+            .eq('project_id', activeProjectId)
+            .eq('kind', 'direct')
+            .eq('archived', false)
+            .in('id', agentChannels.map(c => c.channel_id))
+            .limit(1)
+            .maybeSingle()
+
+          if (dmChannel) {
+            channelId = dmChannel.id
+
+            // Build members map for the hook
+            const { data: userMemberRow } = await service
+              .from('members')
+              .select('id, display_name')
+              .eq('id', userMemberId)
+              .single()
+
+            membersMap = {
+              [userMemberId]: {
+                displayName: userMemberRow?.display_name ?? 'You',
+                type: 'user',
+              },
+              [agentMember.id]: {
+                displayName: agentMember.display_name ?? agentName,
+                type: 'agent',
+                iconUrl: agent.icon_url,
+                category: agent.category,
+              },
+            }
+          }
+        }
+      }
+    }
+  }
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -66,14 +133,22 @@ export default async function DirectMessagePage({
 
       {isNotReady ? (
         <ProvisioningWaitScreen instanceId={instance.id} agentName={agentName} initialStatus={instance.status} />
-      ) : (
-        <DiscordChatPanel
-          agentInstanceId={instance.id}
+      ) : channelId && userMemberId ? (
+        <ChannelChat
+          channelId={channelId}
+          userMemberId={userMemberId}
+          members={membersMap}
           agentName={agentName}
           agentCategory={agent.category}
           agentIconUrl={agent.icon_url}
-          agentStatus={instance.status}
+          placeholder={`Message ${agentName}`}
         />
+      ) : (
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-muted-foreground">
+            Setting up your conversation channel...
+          </p>
+        </div>
       )}
     </div>
   )
