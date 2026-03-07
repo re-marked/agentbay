@@ -121,12 +121,18 @@ else
   done
 fi
 
-# ── 3. Role overrides (sub-agents) — only on first boot
+# ── 3. Role overrides (sub-agents + co-founder) — only on first boot
 if [ -n "$AGENT_SOUL_MD" ] && [ ! -f /data/.initialized ]; then
   printf '%s' "$AGENT_SOUL_MD" > /data/workspace/SOUL.md
 fi
 if [ -n "$AGENT_YAML" ] && [ ! -f /data/.initialized ]; then
   printf '%s' "$AGENT_YAML" > /data/workspace/AGENT.yaml
+fi
+if [ -n "$AGENT_WHOAMI_MD" ] && [ ! -f /data/.initialized ]; then
+  printf '%s' "$AGENT_WHOAMI_MD" > /data/workspace/WHOAMI.md
+fi
+if [ -n "$AGENT_WHEREAMI_MD" ] && [ ! -f /data/.initialized ]; then
+  printf '%s' "$AGENT_WHEREAMI_MD" > /data/workspace/WHEREAMI.md
 fi
 
 # ── 4. Normalize Google key name for OpenClaw compatibility
