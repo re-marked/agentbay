@@ -1,7 +1,21 @@
 # AgentBay — Codebase Guide
 
-App Store-style marketplace for OpenClaw AI agents. Users hire assistants; creators publish and earn.
-(Rebranded from OpenAgents to AgentBay — may revert later)
+Your Personal Corporation — a self-growing organization of AI agents that work FOR you.
+User = CEO, Personal AI = Co-founder. Not a chatbot platform. A company you own.
+
+## Vision & Source of Truth
+
+**`apps/docs/`** is the authoritative design spec (Obsidian vault, gitignored, local only).
+Read it before building anything new. It contains:
+- `vision/` — what AgentBay is, the hierarchy, agenticity, radical transparency
+- `primitives/` — Members, Channels, Messages, Tasks, Teams, Externals
+- `architecture/` — how things connect, swap surfaces, data flow
+- `flows/` — onboarding, hiring, heartbeat, messaging
+- `building-plan/` — layered implementation plan
+- `screens/` — UI specs for every screen
+- `concepts/` — BRAIN framework, heartbeat, autonomy, personality
+
+When in doubt about a design decision, check `apps/docs/` first.
 
 ## Stack
 
@@ -17,10 +31,11 @@ App Store-style marketplace for OpenClaw AI agents. Users hire assistants; creat
 ```
 apps/
   marketplace/        # Next.js 15 app — main product (Vercel)
-  router/             # Hono app — central message pipeline (replaces SSE Gateway)
-  sse-gateway/        # Hono app — SSE proxy on Fly.io (legacy, being replaced by Router)
-  docs/               # Architecture documentation
+  cli/                # Open-source local CLI — same core, local adapters
+  sse-gateway/        # Legacy SSE proxy on Fly.io (v1 only, do not modify)
+  docs/               # Obsidian vault — vision & architecture (gitignored)
 packages/
+  core/               # Shared types, interfaces, router logic
   db/                 # Supabase client, types, auth middleware
   fly/                # Typed Fly Machines API client
   ui/                 # Shared shadcn components
@@ -31,6 +46,39 @@ trigger/              # Trigger.dev task definitions
 docker/
   agent-base/         # Base OpenClaw Docker image
 ```
+
+## packages/core — The Shared Foundation
+
+`packages/core` contains adapter-agnostic code shared by both CLI and marketplace:
+
+- **Types**: Member, Channel, Message, Task, Team, Project, AgentConfig, AgentProcess
+- **Interfaces**: Store, AgentManager, Events — three swap surfaces
+- **Router**: `sendMessage()` — message pipeline with DM auto-routing, @mention routing, depth guard, dedup, cooldown
+
+Both apps import from `@agentbay/core` and provide their own adapter implementations:
+
+| Surface | CLI (local) | Cloud (marketplace) |
+|---------|-------------|---------------------|
+| **Store** | SQLite via `node:sqlite` | Supabase Postgres |
+| **AgentManager** | Local OpenClaw child processes | Fly.io Machines API |
+| **Events** | Node EventEmitter | Supabase Realtime |
+
+When building new features, put adapter-agnostic logic in `packages/core`.
+Put adapter-specific code in the respective app's `adapters/` directory.
+
+## apps/cli — Open Source Local Mode
+
+Working CLI that runs a personal corporation locally:
+- `agentbay init <name>` — create corp, spawn co-founder from `~/.openclaw`
+- `agentbay chat [project-id]` — resume chatting
+- `agentbay status` — show corps, members, channels, tasks
+- Auto-attaches to existing OpenClaw gateway (reads auth token from `~/.openclaw/openclaw.json`)
+- Data stored at `~/.agentbay/agentbay.db` (SQLite)
+
+## apps/sse-gateway — Legacy (DO NOT MODIFY)
+
+v1 WebSocket-to-SSE bridge for the current production chat. Still deployed at `agentbay-sse-gateway.fly.dev`.
+Will be decommissioned when the new workspace chat is built. Do not invest time here.
 
 ## Commands
 
@@ -54,32 +102,6 @@ pnpm type-check       # Type-check all
 | `(workspace)` | `/workspace/*`, `/settings/*`, `/usage` | Required → `/login` |
 | `(platform)` | `/platform/*` | Required (creator role) → `/platform/login` |
 
-### Key Files
-
-```
-src/
-  app/
-    layout.tsx                    # Root layout (fonts, providers, theme)
-    globals.css                   # Tailwind v4 + shadcn CSS vars (edit --radius etc here)
-    icon.tsx                      # Favicon (auto-generated from Sierpinski logo)
-    (public)/layout.tsx           # Public layout — uses PublicSiteHeader
-    (workspace)/layout.tsx        # Workspace layout — auth guard
-    (platform)/layout.tsx         # Platform layout — auth guard
-    auth/callback/route.ts        # OAuth callback handler
-  components/
-    ui/                           # shadcn components (don't edit manually)
-    public-site-header.tsx        # Nav with search bar (/ shortcut)
-    sierpinski-logo.tsx           # SVG logo
-    providers.tsx                 # Theme provider
-  lib/
-    auth/
-      actions.ts                  # signInWithGoogle, signInWithGitHub, signOut
-      get-user.ts                 # getUser() — server-side
-    trigger.ts                    # triggerProvision, triggerDestroy helpers
-    utils.ts                      # cn() helper
-  middleware.ts                   # Supabase session refresh on every request
-```
-
 ### Styling
 
 Global design tokens live in `src/app/globals.css`. Change these to restyle the whole app:
@@ -89,7 +111,7 @@ Global design tokens live in `src/app/globals.css`. Change these to restyle the 
 --primary: ...           /* brand color */
 ```
 
-shadcn components auto-derive from these variables. Never hardcode `rounded-lg` values in one-off components — change the token.
+shadcn components auto-derive from these variables. Never hardcode values — change the token.
 
 ## Auth Flow
 
@@ -97,65 +119,41 @@ shadcn components auto-derive from these variables. Never hardcode `rounded-lg` 
 2. Supabase redirects to Google → callback hits `/auth/callback`
 3. `exchangeCodeForSession()` sets cookie → redirect to `/workspace/home`
 4. `middleware.ts` refreshes session on every request
-5. Layout files double-check auth and redirect if unauthenticated
-6. On first sign-up: `handle_new_user` Postgres trigger creates `users` row + 100 free credits
+5. On first sign-up: `handle_new_user` Postgres trigger creates `users` row + 100 free credits
 
 ## Database
 
-Schema in Supabase. Key tables:
+Schema in Supabase. Two systems coexist during migration:
+
+**Legacy (v1 — powers current UI):**
 
 | Table | Purpose |
 |-------|---------|
-| `users` | User profiles (mirrors auth.users) |
-| `agents` | Marketplace listings |
 | `agent_instances` | User ↔ Agent pair + Fly.io machine info |
 | `sessions` | Chat sessions |
 | `messages` | Message history |
-| `credit_balances` | User credits (subscription + topup) |
-| `credit_transactions` | Credit ledger |
-| `usage_events` | Token/compute usage per session |
-| `creator_earnings` | Per-session earnings for creators |
-| `relay_connections` | Telegram/Slack/Discord/WhatsApp links |
+
+**Workspace (v2 — being built):**
+
+| Table | Purpose |
+|-------|---------|
+| `members` | Agent/user identity within a project (rank, status, type) |
+| `channels` | Communication channels (broadcast, team, direct, system) |
+| `channel_messages` | Messages in channels |
+| `tasks` | Work items with status, priority, assignment |
+| `teams` | Organizational units within projects |
 
 RLS is enabled on all tables. Service role (used by Trigger.dev) bypasses RLS.
 
-## Agent Lifecycle
-
-```
-User hires → agent_instances INSERT (status=provisioning)
-  → Supabase DB webhook → Edge Function: on-purchase-created
-  → Trigger.dev: provision-agent-machine
-  → Fly.io: create App + Volume + Machine
-  → Machine starts OpenClaw on port 18789
-  → agent_instances UPDATE (status=running)
-  → User redirected to chat
-```
-
-Suspend/resume is handled automatically by Fly.io (`autostop: suspend`). ~200-500ms resume.
-
 ## OpenClaw API Key Storage
 
-**CRITICAL**: OpenClaw does NOT read API keys from environment variables. It reads them from `auth-profiles.json` on the volume:
+**CRITICAL**: OpenClaw reads API keys from `auth-profiles.json`, NOT env vars:
 
 ```
 /data/agents/main/agent/auth-profiles.json
 ```
 
-This file must exist on the agent's volume for the agent to call any LLM provider. Format:
-
-```json
-{
-  "profiles": {
-    "google": { "type": "api-key", "apiKey": "<GEMINI_API_KEY>" },
-    "anthropic": { "type": "api-key", "apiKey": "<ANTHROPIC_API_KEY>" },
-    "openai": { "type": "api-key", "apiKey": "<OPENAI_API_KEY>" }
-  }
-}
-```
-
-The provisioning task (`trigger/provision-agent-machine.ts`) passes API keys as env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). The Docker entrypoint (`docker/agent-base/entrypoint.sh`) must convert these env vars into `auth-profiles.json` at boot so OpenClaw can find them.
-
-If a machine has a fresh volume with no `auth-profiles.json`, the agent will silently fail — it logs "No API key found for provider" but does NOT send an error over WebSocket, causing the gateway to hang.
+The provisioning task passes API keys as env vars. The Docker entrypoint converts them to `auth-profiles.json`. Missing file = silent failure.
 
 ## Trigger.dev Tasks
 
@@ -166,49 +164,9 @@ If a machine has a fresh volume with no `auth-profiles.json`, the agent will sil
 | `health-check-machines.ts` | `health-check-machines` | Cron every 5 min |
 | `shutdown-idle-machines.ts` | `shutdown-idle-machines` | Cron every hour |
 
-Deploy tasks: `npx trigger.dev@latest deploy`
-
-## Fly.io Client
-
-`packages/fly` — typed wrapper around Fly Machines API.
-
-```typescript
-import { FlyClient } from '@agentbay/fly'
-const fly = new FlyClient() // reads FLY_API_TOKEN from env
-await fly.createMachine(appName, { region, config })
-await fly.waitForMachineState(appName, machineId, 'started')
-```
-
-## SSE Gateway
-
-`apps/sse-gateway/` — thin Hono app deployed on Fly.io.
-
-- Receives POST `/v1/stream` from Vercel with `x-machine-id` header
-- Uses `fly-replay` to route to correct agent machine
-- Proxies SSE response back to Vercel
-- Vercel can't reach Fly.io 6PN directly — this bridges the gap
-
-## Environment Variables
-
-Copy `apps/marketplace/.env.local.example` → `.env.local`:
-
-```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-FLY_API_TOKEN=          # From fly.io → Tokens
-FLY_ORG_SLUG=personal
-FLY_REGION=iad
-TRIGGER_SECRET_KEY=     # From trigger.dev → API Keys
-SSE_GATEWAY_URL=        # Your deployed sse-gateway Fly app URL
-SSE_GATEWAY_SECRET=     # Random string, set on both sides
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-```
-
-
 ## Operational Tasks
 
-You have full access to run infrastructure commands directly — never ask the user to do these manually:
+Run infrastructure commands directly — never ask the user to do these manually:
 
 - **SQL migrations**: Run via `npx supabase` CLI or the Supabase Management API
 - **Docker**: Build and push images (`docker build`, `docker push`, `fly auth docker`)
@@ -218,59 +176,29 @@ You have full access to run infrastructure commands directly — never ask the u
 
 ## Key Conventions
 
-- **Use Agent with an A for AgentBay's agents, and agent with an a for any other agent.**
-- **Server Components by default**: use `'use client'` only when needed (interactivity, hooks)
-- **Service client for admin ops**: use `createServiceClient()` from `@agentbay/db/server` in Trigger.dev tasks — bypasses RLS
-- **Regular client for user ops**: use `createClient()` from `@agentbay/db/server` in route handlers/Server Components
+- **Server Components by default**: use `'use client'` only when needed
+- **Service client for admin ops**: `createServiceClient()` from `@agentbay/db/server`
+- **Regular client for user ops**: `createClient()` from `@agentbay/db/server`
 - **shadcn components**: go in `src/components/ui/` — don't edit these manually
-- **Branching strategy (v2 development)**:
-  - `main` = stable production (AgentBay v1). Do NOT push directly.
-  - `dev` = v2 integration branch. All new workspace platform work lands here.
-  - `feature/*` = short-lived feature branches, always branched off `dev`.
+- **Branching strategy**:
+  - `main` = stable production. Do NOT push directly.
+  - `dev` = v2 integration branch. All new work lands here.
+  - `feature/*` = short-lived branches off `dev`.
   - Flow: `feature/xyz` → PR into `dev` (rebase merge) → delete feature branch.
-  - When AgentBay v2 is ready: merge `dev` into `main` via PR.
-- **When working on a new feature**: create a git branch named `feature/feature-name` off `dev` and commit & push changes on that branch
-- **When feature is ready**: merge the branch into `dev` via rebase with a proper documented PR and delete the feature branch
-- **Prioritize committing more frequently (IMPORTANT)**: Commit often, with small, focused changes, multiple commits per each prompt. This makes it easier to review and merge changes.
-- **Always add co-authors**: Include both authors (me and Claude) in every commit. Make sure to include the email address of each author. My email is psyhik17@gmail.com and my Github username is re-marked.
+- **Commit frequently**: Small focused commits, multiple per prompt.
+- **Always add co-authors**: Include both in every commit:
+  - `Co-Authored-By: Mark <psyhik17@gmail.com>`
+  - `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
 
 ## Worktrees for Parallel Sessions
-
-When the user wants you to work on a feature in parallel with other Claude Code sessions, use a git worktree. This gives you an isolated copy of the repo on your own branch so you don't interfere with other sessions.
-
-### How to set up a worktree
 
 ```bash
 # Create a worktree branched off dev
 git worktree add .claude/worktrees/feature-xyz -b feature/xyz dev
-
-# Install dependencies in the worktree
 cd .claude/worktrees/feature-xyz && pnpm install
 ```
 
-Then do all your work inside `.claude/worktrees/feature-xyz/`. Commit and push to `feature/xyz` as normal.
-
-### When you're done
-
-```bash
-# Push your branch
-git push -u origin feature/xyz
-
-# Create a PR to merge feature/xyz → dev via rebase
-gh pr create --base dev --title "feat: xyz" --body "..."
-
-# Go back to repo root and remove the worktree
-cd /path/to/agentbay
-git worktree remove .claude/worktrees/feature-xyz
-```
-
-### Rules you must follow
-
-- Always branch worktrees off `dev`, never off `main`
-- Never have two worktrees on the same branch
-- Never push to a branch that another session is using
-- Always remove the worktree after the PR is merged — run `git worktree prune` to clean up stale refs
-- If the user says `/worktree`, use the built-in Claude Code worktree command instead of manual setup
+Rules: always branch off `dev`, never two worktrees on same branch, always remove after merge.
 
 Guidelines:
 
