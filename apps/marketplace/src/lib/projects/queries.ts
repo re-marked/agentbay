@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@agentbay/db/server'
+import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
 
 export interface ProjectAgentInstance {
   id: string
@@ -43,7 +44,18 @@ export async function getActiveProjectId(userId: string) {
     ?? userProjects[0]?.id
     ?? null
 
-  return { projects: userProjects, activeProjectId }
+  // Bootstrap workspace primitives (idempotent — fast after first run)
+  let userMemberId: string | null = null
+  if (activeProjectId) {
+    try {
+      const result = await ensureWorkspaceBootstrapped(activeProjectId, userId)
+      userMemberId = result.userMemberId
+    } catch (e) {
+      console.error('[workspace] bootstrap failed:', e)
+    }
+  }
+
+  return { projects: userProjects, activeProjectId, userMemberId }
 }
 
 /**

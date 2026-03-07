@@ -4,6 +4,13 @@ import { createServiceClient } from '@agentbay/db/server'
 import { getUser } from '@/lib/auth/get-user'
 import { triggerProvision, triggerDestroy } from '@/lib/trigger'
 import { revalidatePath } from 'next/cache'
+import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
+import {
+  createAgentMember,
+  createDMChannel,
+  joinBroadcastChannels,
+  archiveAgentMemberByInstanceId,
+} from '@/lib/workspace/agent-lifecycle'
 
 interface HireAgentParams {
   agentSlug: string
@@ -105,6 +112,19 @@ export async function hireAgent({ agentSlug }: HireAgentParams) {
     return { error: `Failed to create instance: ${instanceErr?.message}` } as const
   }
 
+  // 4b. Create workspace member + DM channel for the new agent
+  try {
+    const { userMemberId } = await ensureWorkspaceBootstrapped(projectId, user.id)
+    const { memberId: agentMemberId } = await createAgentMember(
+      projectId, instance.id, agent.name, 'worker', userMemberId
+    )
+    await createDMChannel(projectId, userMemberId, agentMemberId, agent.name)
+    await joinBroadcastChannels(projectId, agentMemberId)
+  } catch (e) {
+    // Non-fatal — bootstrap will backfill on next page load
+    console.error('[hire] workspace member setup failed:', e)
+  }
+
   // 5. Add to default chat (first chat in the project)
   const { data: defaultChat } = await service
     .from('chats')
@@ -153,6 +173,10 @@ export async function removeAgent(instanceId: string) {
 
   if (!inst) return { error: 'Agent not found' }
   if (inst.status === 'destroyed') return { error: 'Agent already removed' }
+
+  // Check workspace rank — block removal of co-founder (rank=master)
+  const archiveResult = await archiveAgentMemberByInstanceId(instanceId)
+  if (archiveResult?.error) return { error: archiveResult.error }
 
   // Mark as destroying immediately for UI feedback
   await service
