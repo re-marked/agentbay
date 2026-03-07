@@ -24,7 +24,7 @@ export default async function DirectMessagePage({
     .select('id, status, display_name, agents!inner(name, category, icon_url)')
     .eq('id', instanceId)
     .eq('user_id', user.id)
-    .in('status', ['running', 'suspended', 'stopped', 'provisioning'])
+    .in('status', ['running', 'suspended', 'stopped', 'provisioning', 'error'])
     .limit(1)
     .single()
 
@@ -34,7 +34,7 @@ export default async function DirectMessagePage({
     name: string; category: string; icon_url: string | null
   }
   const agentName = instance.display_name ?? agent.name
-  const isProvisioning = instance.status === 'provisioning'
+  const isNotReady = instance.status === 'provisioning' || instance.status === 'error'
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -64,8 +64,8 @@ export default async function DirectMessagePage({
         <span className="text-sm font-medium truncate">{agentName}</span>
       </header>
 
-      {isProvisioning ? (
-        <ProvisioningWaitScreen instanceId={instance.id} agentName={agentName} />
+      {isNotReady ? (
+        <ProvisioningWaitScreen instanceId={instance.id} agentName={agentName} initialStatus={instance.status} />
       ) : (
         <DiscordChatPanel
           agentInstanceId={instance.id}
