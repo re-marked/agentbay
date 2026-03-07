@@ -1,0 +1,116 @@
+#!/bin/sh
+# workspace-task — create, list, and update tasks
+# Usage:
+#   workspace-task create "title" [--description "..."] [--priority high|medium|low] [--assign <memberId>]
+#   workspace-task list [--status pending|assigned|in_progress|completed|failed] [--priority high] [--mine]
+#   workspace-task update <taskId> --status in_progress
+#   workspace-task update <taskId> --status completed
+#
+# Requires: ROUTER_URL, ROUTER_SERVICE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+
+set -e
+
+API="${ROUTER_URL}/v1/agent"
+AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
+MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
+PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
+
+usage() {
+  echo "Usage:"
+  echo "  workspace-task create \"title\" [--description \"...\"] [--priority high|medium|low] [--assign <memberId>]"
+  echo "  workspace-task list [--status STATUS] [--priority PRIORITY] [--mine] [--limit N]"
+  echo "  workspace-task update <taskId> --status STATUS [--priority PRIORITY] [--title \"...\"]"
+  exit 1
+}
+
+case "${1:-}" in
+  create)
+    shift
+    TITLE=""
+    DESC=""
+    PRIORITY="medium"
+    ASSIGN=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --description) DESC="$2"; shift 2 ;;
+        --priority)    PRIORITY="$2"; shift 2 ;;
+        --assign)      ASSIGN="$2"; shift 2 ;;
+        *)             TITLE="$1"; shift ;;
+      esac
+    done
+    if [ -z "$TITLE" ]; then
+      echo "Error: title is required"
+      exit 1
+    fi
+    BODY="{\"title\":\"$(echo "$TITLE" | sed 's/"/\\"/g')\",\"priority\":\"$PRIORITY\""
+    if [ -n "$DESC" ]; then
+      BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
+    fi
+    if [ -n "$ASSIGN" ]; then
+      BODY="$BODY,\"assignedTo\":\"$ASSIGN\""
+    fi
+    BODY="$BODY}"
+    curl -sf -X POST "${API}/tasks" \
+      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" \
+      -H "Content-Type: application/json" \
+      -d "$BODY"
+    echo
+    ;;
+
+  list)
+    shift
+    QUERY=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status)   QUERY="${QUERY}&status=$2"; shift 2 ;;
+        --priority) QUERY="${QUERY}&priority=$2"; shift 2 ;;
+        --mine)     QUERY="${QUERY}&assignee=me"; shift ;;
+        --limit)    QUERY="${QUERY}&limit=$2"; shift 2 ;;
+        *)          shift ;;
+      esac
+    done
+    # Strip leading &
+    QUERY="$(echo "$QUERY" | sed 's/^&//')"
+    curl -sf "${API}/tasks?${QUERY}" \
+      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        (d.tasks||[]).forEach(t=>{
+          const pri=t.priority==='high'?'!!':t.priority==='low'?'..':'  ';
+          console.log(pri+' ['+t.status+'] '+t.title+' ('+t.id.slice(0,8)+')');
+          if(t.description) console.log('   '+t.description.slice(0,120));
+        });
+        if(!(d.tasks||[]).length) console.log('No tasks found.');
+      "
+    ;;
+
+  update)
+    TASK_ID="$2"
+    if [ -z "$TASK_ID" ]; then
+      echo "Error: taskId is required"
+      exit 1
+    fi
+    shift 2
+    BODY="{\"taskId\":\"$TASK_ID\""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status)      BODY="$BODY,\"status\":\"$2\""; shift 2 ;;
+        --priority)    BODY="$BODY,\"priority\":\"$2\""; shift 2 ;;
+        --title)       BODY="$BODY,\"title\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
+        --description) BODY="$BODY,\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
+        --assign)      BODY="$BODY,\"assignedTo\":\"$2\""; shift 2 ;;
+        *)             shift ;;
+      esac
+    done
+    BODY="$BODY}"
+    curl -sf -X PATCH "${API}/tasks" \
+      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" \
+      -H "Content-Type: application/json" \
+      -d "$BODY"
+    echo
+    ;;
+
+  *)
+    usage
+    ;;
+esac

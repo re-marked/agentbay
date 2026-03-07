@@ -1,0 +1,78 @@
+#!/bin/sh
+# workspace-msg — send and read messages in workspace channels
+# Usage:
+#   workspace-msg send <channelId> "message content"
+#   workspace-msg read <channelId> [--limit N]
+#   workspace-msg channels              # list your channels
+#
+# Requires: ROUTER_URL, ROUTER_SERVICE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+
+set -e
+
+API="${ROUTER_URL}/v1/agent"
+AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
+MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
+PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
+
+usage() {
+  echo "Usage:"
+  echo "  workspace-msg send <channelId> \"message\""
+  echo "  workspace-msg read <channelId> [--limit N]"
+  echo "  workspace-msg channels"
+  exit 1
+}
+
+case "${1:-}" in
+  send)
+    CHANNEL_ID="$2"
+    CONTENT="$3"
+    if [ -z "$CHANNEL_ID" ] || [ -z "$CONTENT" ]; then
+      echo "Error: workspace-msg send <channelId> \"message\""
+      exit 1
+    fi
+    curl -sf -X POST "${API}/messages" \
+      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" \
+      -H "Content-Type: application/json" \
+      -d "$(printf '{"channelId":"%s","content":"%s"}' "$CHANNEL_ID" "$(echo "$CONTENT" | sed 's/"/\\"/g')")"
+    echo
+    ;;
+
+  read)
+    CHANNEL_ID="$2"
+    LIMIT="${4:-50}"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: workspace-msg read <channelId>"
+      exit 1
+    fi
+    # Parse --limit flag
+    if [ "${3:-}" = "--limit" ] && [ -n "${4:-}" ]; then
+      LIMIT="$4"
+    fi
+    curl -sf "${API}/messages?channelId=${CHANNEL_ID}&limit=${LIMIT}" \
+      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        (d.messages||[]).forEach(m=>{
+          const t=new Date(m.createdAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+          const tag=m.senderType==='agent'?'[bot]':'';
+          console.log('['+t+'] '+m.senderName+tag+': '+m.content);
+        });
+      "
+    ;;
+
+  channels)
+    curl -sf "${API}/channels" \
+      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        (d.channels||[]).forEach(c=>{
+          const prefix=c.kind==='broadcast'?'#':c.kind==='direct'?'@':'~';
+          console.log(c.id+' '+prefix+c.name+' ('+c.kind+')');
+        });
+      "
+    ;;
+
+  *)
+    usage
+    ;;
+esac
