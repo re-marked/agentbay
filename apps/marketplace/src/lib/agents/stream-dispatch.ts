@@ -68,9 +68,7 @@ export function streamFromAgent(
 
       try {
         // Connect to agent
-        console.log(`[stream] Connecting to ${flyAppName}...`)
         ws = await connectToAgent(flyAppName, gatewayToken)
-        console.log(`[stream] Connected. Handshake complete.`)
 
         // Use provided stable session key, or fall back to a unique one
         const resolvedSessionKey = sessionKey ?? `agent:main:session-v2-${Date.now()}`
@@ -84,7 +82,6 @@ export function streamFromAgent(
           return
         }
 
-        console.log(`[stream] Sending chat.send (session=${resolvedSessionKey}, msg=${lastMessage.content.slice(0, 80)})`)
         sendChatMessage(ws, resolvedSessionKey, lastMessage.content)
 
         // Listen for the agent's turn and stream events
@@ -92,8 +89,6 @@ export function streamFromAgent(
 
         for await (const event of listenForAgentTurn(ws)) {
           if (signal?.aborted) break
-
-          console.log(`[stream] Event: ${event.type}`, event.type === 'delta' ? `(${(event.data.content as string)?.length ?? 0} chars)` : JSON.stringify(event.data).slice(0, 200))
 
           switch (event.type) {
             case 'delta':
