@@ -1,7 +1,7 @@
 #!/bin/sh
 # workspace-task — create, list, and update tasks
 # Usage:
-#   workspace-task create "title" [--description "..."] [--priority high|medium|low] [--assign <memberId>]
+#   workspace-task create "title" [--description "..."] [--priority high|normal|low] [--assign <memberId>]
 #   workspace-task list [--status pending|assigned|in_progress|completed|failed] [--priority high] [--mine]
 #   workspace-task update <taskId> --status in_progress
 #   workspace-task update <taskId> --status completed
@@ -10,6 +10,18 @@
 
 set -e
 
+# ── Preflight: check required env vars ──
+missing=""
+[ -z "$ROUTER_URL" ] && missing="$missing ROUTER_URL"
+[ -z "$ROUTER_SERVICE_KEY" ] && missing="$missing ROUTER_SERVICE_KEY"
+[ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
+[ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
+if [ -n "$missing" ]; then
+  echo "Error: Missing required env vars:$missing"
+  echo "These are set during provisioning. If missing, the machine was provisioned without workspace context."
+  exit 1
+fi
+
 API="${ROUTER_URL}/v1/agent"
 AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
 MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
@@ -17,10 +29,27 @@ PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
 
 usage() {
   echo "Usage:"
-  echo "  workspace-task create \"title\" [--description \"...\"] [--priority high|medium|low] [--assign <memberId>]"
+  echo "  workspace-task create \"title\" [--description \"...\"] [--priority high|normal|low] [--assign <memberId>]"
   echo "  workspace-task list [--status STATUS] [--priority PRIORITY] [--mine] [--limit N]"
   echo "  workspace-task update <taskId> --status STATUS [--priority PRIORITY] [--title \"...\"]"
   exit 1
+}
+
+# Helper: run curl and show errors clearly
+api_call() {
+  METHOD="$1"; shift
+  URL="$1"; shift
+  TMPFILE=$(mktemp)
+  HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
+    -H "$AUTH" -H "$MEMBER" -H "$PROJECT" "$@" 2>&1)
+  if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
+    echo "Error: HTTP $HTTP_CODE from $URL"
+    cat "$TMPFILE" 2>/dev/null
+    rm -f "$TMPFILE"
+    exit 1
+  fi
+  cat "$TMPFILE"
+  rm -f "$TMPFILE"
 }
 
 case "${1:-}" in
@@ -50,8 +79,7 @@ case "${1:-}" in
       BODY="$BODY,\"assignedTo\":\"$ASSIGN\""
     fi
     BODY="$BODY}"
-    curl -sf -X POST "${API}/tasks" \
-      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" \
+    api_call POST "${API}/tasks" \
       -H "Content-Type: application/json" \
       -d "$BODY"
     echo
@@ -69,12 +97,11 @@ case "${1:-}" in
         *)          shift ;;
       esac
     done
-    # Strip leading &
     QUERY="$(echo "$QUERY" | sed 's/^&//')"
-    curl -sf "${API}/tasks?${QUERY}" \
-      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" | \
+    api_call GET "${API}/tasks?${QUERY}" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(d.error){console.log('API Error:',d.error);process.exit(1)}
         (d.tasks||[]).forEach(t=>{
           const pri=t.priority==='high'?'!!':t.priority==='low'?'..':'  ';
           console.log(pri+' ['+t.status+'] '+t.title+' ('+t.id.slice(0,8)+')');
@@ -103,8 +130,7 @@ case "${1:-}" in
       esac
     done
     BODY="$BODY}"
-    curl -sf -X PATCH "${API}/tasks" \
-      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" \
+    api_call PATCH "${API}/tasks" \
       -H "Content-Type: application/json" \
       -d "$BODY"
     echo

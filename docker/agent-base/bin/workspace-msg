@@ -9,6 +9,18 @@
 
 set -e
 
+# ── Preflight: check required env vars ──
+missing=""
+[ -z "$ROUTER_URL" ] && missing="$missing ROUTER_URL"
+[ -z "$ROUTER_SERVICE_KEY" ] && missing="$missing ROUTER_SERVICE_KEY"
+[ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
+[ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
+if [ -n "$missing" ]; then
+  echo "Error: Missing required env vars:$missing"
+  echo "These are set during provisioning. If missing, the machine was provisioned without workspace context."
+  exit 1
+fi
+
 API="${ROUTER_URL}/v1/agent"
 AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
 MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
@@ -22,6 +34,23 @@ usage() {
   exit 1
 }
 
+# Helper: run curl and show errors clearly
+api_call() {
+  METHOD="$1"; shift
+  URL="$1"; shift
+  TMPFILE=$(mktemp)
+  HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
+    -H "$AUTH" -H "$MEMBER" -H "$PROJECT" "$@" 2>&1)
+  if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
+    echo "Error: HTTP $HTTP_CODE from $URL"
+    cat "$TMPFILE" 2>/dev/null
+    rm -f "$TMPFILE"
+    exit 1
+  fi
+  cat "$TMPFILE"
+  rm -f "$TMPFILE"
+}
+
 case "${1:-}" in
   send)
     CHANNEL_ID="$2"
@@ -30,8 +59,7 @@ case "${1:-}" in
       echo "Error: workspace-msg send <channelId> \"message\""
       exit 1
     fi
-    curl -sf -X POST "${API}/messages" \
-      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" \
+    api_call POST "${API}/messages" \
       -H "Content-Type: application/json" \
       -d "$(printf '{"channelId":"%s","content":"%s"}' "$CHANNEL_ID" "$(echo "$CONTENT" | sed 's/"/\\"/g')")"
     echo
@@ -44,31 +72,32 @@ case "${1:-}" in
       echo "Error: workspace-msg read <channelId>"
       exit 1
     fi
-    # Parse --limit flag
     if [ "${3:-}" = "--limit" ] && [ -n "${4:-}" ]; then
       LIMIT="$4"
     fi
-    curl -sf "${API}/messages?channelId=${CHANNEL_ID}&limit=${LIMIT}" \
-      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" | \
+    api_call GET "${API}/messages?channelId=${CHANNEL_ID}&limit=${LIMIT}" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(d.error){console.log('API Error:',d.error);process.exit(1)}
         (d.messages||[]).forEach(m=>{
           const t=new Date(m.createdAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
           const tag=m.senderType==='agent'?'[bot]':'';
           console.log('['+t+'] '+m.senderName+tag+': '+m.content);
         });
+        if(!(d.messages||[]).length) console.log('No messages.');
       "
     ;;
 
   channels)
-    curl -sf "${API}/channels" \
-      -H "$AUTH" -H "$MEMBER" -H "$PROJECT" | \
+    api_call GET "${API}/channels" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(d.error){console.log('API Error:',d.error);process.exit(1)}
         (d.channels||[]).forEach(c=>{
           const prefix=c.kind==='broadcast'?'#':c.kind==='direct'?'@':'~';
           console.log(c.id+' '+prefix+c.name+' ('+c.kind+')');
         });
+        if(!(d.channels||[]).length) console.log('No channels found.');
       "
     ;;
 
