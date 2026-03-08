@@ -172,16 +172,16 @@ export async function POST(request: Request) {
     })
   }
 
-  // 8. Load recent history for context
+  // 8. Load recent history for context (newest 30, then reverse to chronological order)
   const { data: history } = await service
     .from('channel_messages')
     .select('content, sender_id, message_kind')
     .eq('channel_id', channelId)
     .eq('message_kind', 'text')
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(30)
 
-  const messages = (history ?? []).map(msg => ({
+  const messages = (history ?? []).reverse().map(msg => ({
     role: (msg.sender_id === userMember.id ? 'user' : 'assistant') as 'user' | 'assistant',
     content: msg.content,
   }))
