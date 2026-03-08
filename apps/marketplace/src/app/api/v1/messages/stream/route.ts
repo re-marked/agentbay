@@ -186,33 +186,65 @@ export async function POST(request: Request) {
     content: msg.content,
   }))
 
-  // 9. Stream from agent with persistence callback
+  // 9. Stream from agent — tools persist as real messages, text persists on completion
+  const persistedToolIds = new Set<string>()
+
   const stream = streamFromAgent(
     flyAppName,
     gatewayToken,
     messages,
-    async (result) => {
-      // Persist agent response
-      if (result.content || result.tools.length > 0) {
-        await service
-          .from('channel_messages')
-          .insert({
-            channel_id: channelId,
-            sender_id: agentMember.id,
-            content: result.content || '(used tools)',
-            message_kind: 'text',
-            depth: 1,
-            origin_id: userMsg.id,
-            parent_id: userMsg.id,
-            metadata: result.tools.length > 0 ? { tools: result.tools } : null,
-          })
-      }
+    {
+      async onToolEvent(tool) {
+        // Persist each tool as a separate channel_message (tool_result kind)
+        // Only persist on 'end' or 'error' — start events are ephemeral
+        if (tool.state === 'end' || tool.state === 'error') {
+          if (persistedToolIds.has(tool.id)) return // dedup
+          persistedToolIds.add(tool.id)
 
-      // Mark agent idle
-      await service
-        .from('members')
-        .update({ status: 'idle' })
-        .eq('id', agentMember.id)
+          await service
+            .from('channel_messages')
+            .insert({
+              channel_id: channelId,
+              sender_id: agentMember.id,
+              content: `${tool.tool}${tool.args ? ` ${tool.args}` : ''}`,
+              message_kind: 'tool_result',
+              depth: 1,
+              origin_id: userMsg.id,
+              parent_id: userMsg.id,
+              metadata: {
+                id: tool.id,
+                tool: tool.tool,
+                args: tool.args,
+                output: tool.output,
+                error: tool.error,
+                status: tool.state === 'end' ? 'done' : 'error',
+              },
+            })
+        }
+      },
+
+      async onComplete(result) {
+        // Persist the agent's text response (if any)
+        if (result.content) {
+          await service
+            .from('channel_messages')
+            .insert({
+              channel_id: channelId,
+              sender_id: agentMember.id,
+              content: result.content,
+              message_kind: 'text',
+              depth: 1,
+              origin_id: userMsg.id,
+              parent_id: userMsg.id,
+            })
+        }
+
+        // Mark agent idle
+        await service
+          .from('members')
+          .update({ status: 'idle' })
+          .eq('id', agentMember.id)
+      },
     },
     request.signal,
   )

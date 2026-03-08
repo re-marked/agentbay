@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useRef, useCallback } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
 import { useStreamingChat } from '@/hooks/use-streaming-chat'
 import { MarkdownContent } from '@/components/markdown-content'
@@ -194,15 +194,42 @@ export function ChannelChat({
                     {formatTime(new Date(group.messages[0].createdAt))}
                   </span>
                 </div>
-                {group.messages.map(msg => (
-                  <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
-                    <MarkdownContent content={msg.content} />
-                    {/* Tool badges from persisted metadata */}
-                    {Array.isArray(msg.metadata?.tools) && (
-                      <ToolUseBlockList toolUses={msg.metadata.tools as ToolUse[]} />
-                    )}
-                  </div>
-                ))}
+                {/* Collect consecutive tool_result messages into blocks */}
+                {(() => {
+                  const elements: React.ReactNode[] = []
+                  let toolBatch: ToolUse[] = []
+
+                  const flushTools = () => {
+                    if (toolBatch.length > 0) {
+                      elements.push(
+                        <ToolUseBlockList key={`tools-${toolBatch[0].id}`} toolUses={[...toolBatch]} />
+                      )
+                      toolBatch = []
+                    }
+                  }
+
+                  for (const msg of group.messages) {
+                    if (msg.messageKind === 'tool_result' && msg.metadata) {
+                      const meta = msg.metadata as Record<string, unknown>
+                      toolBatch.push({
+                        id: (meta.id as string) ?? msg.id,
+                        tool: (meta.tool as string) ?? 'unknown',
+                        args: meta.args as string | undefined,
+                        output: meta.output as string | undefined,
+                        status: (meta.status as 'done' | 'error') ?? 'done',
+                      })
+                    } else {
+                      flushTools()
+                      elements.push(
+                        <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
+                          <MarkdownContent content={msg.content} />
+                        </div>
+                      )
+                    }
+                  }
+                  flushTools()
+                  return elements
+                })()}
               </div>
             </div>
           ))}

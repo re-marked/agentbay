@@ -230,11 +230,19 @@ export async function* listenForAgentTurn(
           const toolId = td.toolCallId ?? td.id ?? `tool-${Date.now()}`
           const toolName = td.name ?? td.tool ?? 'unknown'
 
+          // Stringify args/output if they're objects — React can't render objects
+          const rawArgs = td.args ?? td.arguments ?? td.input ?? undefined
+          const rawOutput = td.result ?? td.output ?? undefined
+          const stringify = (v: unknown): string | undefined =>
+            v === undefined || v === null ? undefined
+            : typeof v === 'string' ? v
+            : JSON.stringify(v)
+
           const toolInfo: ToolInfo = {
             id: toolId,
             tool: toolName,
-            args: td.args ?? td.arguments ?? td.input ?? undefined,
-            output: td.result ?? td.output ?? undefined,
+            args: stringify(rawArgs),
+            output: stringify(rawOutput),
             state,
           }
 

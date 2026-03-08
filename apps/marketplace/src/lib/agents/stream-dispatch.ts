@@ -8,20 +8,36 @@ interface ChatMessage {
 
 interface StreamResult {
   content: string
-  tools: Array<{ id: string; tool: string; args?: string; output?: string; status: string }>
+}
+
+interface ToolEvent {
+  id: string
+  tool: string
+  state: string
+  args?: string
+  output?: string
+  error?: string
+}
+
+interface StreamCallbacks {
+  /** Called when a tool event fires (start, end, error) — persist as channel_message */
+  onToolEvent: (tool: ToolEvent) => Promise<void>
+  /** Called when the agent's text response is complete — persist as channel_message */
+  onComplete: (result: StreamResult) => Promise<void>
 }
 
 /**
  * Connect to an agent via WebSocket and return a ReadableStream of SSE events.
  *
  * The stream emits: delta, tool, done, error events.
- * After the stream completes, `onComplete` is called with the accumulated result.
+ * Tool events are persisted immediately via onToolEvent callback.
+ * After the stream completes, onComplete is called with the final text.
  */
 export function streamFromAgent(
   flyAppName: string,
   gatewayToken: string,
   messages: ChatMessage[],
-  onComplete: (result: StreamResult) => Promise<void>,
+  callbacks: StreamCallbacks,
   signal?: AbortSignal,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
@@ -68,7 +84,6 @@ export function streamFromAgent(
 
         // Listen for the agent's turn and stream events
         let finalContent = ''
-        let finalTools: StreamResult['tools'] = []
 
         for await (const event of listenForAgentTurn(ws)) {
           if (signal?.aborted) break
@@ -78,24 +93,37 @@ export function streamFromAgent(
               controller.enqueue(formatSSE('delta', { content: event.data.content }))
               break
 
-            case 'tool':
+            case 'tool': {
+              const toolEvent: ToolEvent = {
+                id: event.data.id as string,
+                tool: event.data.tool as string,
+                state: event.data.state as string,
+                args: event.data.args as string | undefined,
+                output: event.data.output as string | undefined,
+                error: event.data.error as string | undefined,
+              }
+
               controller.enqueue(formatSSE('tool', {
-                state: event.data.state,
-                id: event.data.id,
-                tool: event.data.tool,
-                args: event.data.args,
-                output: event.data.output,
-                error: event.data.error,
+                state: toolEvent.state,
+                id: toolEvent.id,
+                tool: toolEvent.tool,
+                args: toolEvent.args,
+                output: toolEvent.output,
+                error: toolEvent.error,
               }))
+
+              // Persist tool as a real message
+              try {
+                await callbacks.onToolEvent(toolEvent)
+              } catch (err) {
+                console.error('[stream-dispatch] onToolEvent failed:', err)
+              }
               break
+            }
 
             case 'done':
               finalContent = (event.data.content as string) ?? ''
-              finalTools = (event.data.tools as StreamResult['tools']) ?? []
-              controller.enqueue(formatSSE('done', {
-                content: finalContent,
-                tools: finalTools,
-              }))
+              controller.enqueue(formatSSE('done', { content: finalContent }))
               break
 
             case 'error':
@@ -104,9 +132,9 @@ export function streamFromAgent(
           }
         }
 
-        // Persist the result after streaming completes
+        // Persist the final text response
         try {
-          await onComplete({ content: finalContent, tools: finalTools })
+          await callbacks.onComplete({ content: finalContent })
         } catch (err) {
           console.error('[stream-dispatch] onComplete failed:', err)
         }
