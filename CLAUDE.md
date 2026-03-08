@@ -3,6 +3,12 @@
 Your Personal Corporation — a self-growing organization of AI agents that work FOR you.
 User = CEO, Personal AI = Co-founder. Not a chatbot platform. A company you own.
 
+## #1 Priority: Read STATUS.md
+
+**`STATUS.md`** is the honest gap analysis between the vision and what's actually built.
+Read it before starting ANY new work. It has checkboxes for every missing feature.
+Cross items off as they ship. The critical path is at the bottom of that file.
+
 ## Vision & Source of Truth
 
 **`apps/docs/`** is the authoritative design spec (Obsidian vault, gitignored, local only).
