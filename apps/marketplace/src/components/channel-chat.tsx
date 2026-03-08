@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
 import { useStreamingChat } from '@/hooks/use-streaming-chat'
 import { MarkdownContent } from '@/components/markdown-content'
@@ -39,19 +39,26 @@ interface MessageGroup {
   senderId: string
   senderName: string
   senderType: 'user' | 'agent'
+  /** 'tools' = all tool_result, 'text' = all other kinds */
+  groupKind: 'tools' | 'text'
   messages: ChannelMessage[]
 }
 
 function groupMessages(messages: ChannelMessage[]): MessageGroup[] {
   return messages.reduce<MessageGroup[]>((groups, msg) => {
     const last = groups[groups.length - 1]
-    if (last && last.senderId === msg.senderId) {
+    const isToolMsg = msg.messageKind === 'tool_result'
+    const msgGroupKind = isToolMsg ? 'tools' : 'text'
+
+    // Continue group only if same sender AND same kind category
+    if (last && last.senderId === msg.senderId && last.groupKind === msgGroupKind) {
       last.messages.push(msg)
     } else {
       groups.push({
         senderId: msg.senderId,
         senderName: msg.senderName ?? 'Unknown',
         senderType: msg.senderType ?? 'user',
+        groupKind: msgGroupKind,
         messages: [msg],
       })
     }
@@ -210,75 +217,63 @@ export function ChannelChat({
             </div>
           )}
 
-          {groups.map((group) => (
-            <div key={group.messages[0].id} className="flex gap-3 hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors">
-              {/* Avatar */}
-              <div className="shrink-0 pt-0.5">
-                {group.senderType === 'agent' ? (
-                  <AgentAvatar
-                    name={group.senderName}
-                    category={agentCategory ?? ''}
-                    iconUrl={agentIconUrl}
-                    size="sm"
-                  />
-                ) : (
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-primary/20 text-primary text-sm font-medium">
-                      {group.senderName.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
+          {groups.map((group) =>
+            group.groupKind === 'tools' ? (
+              /* Tool group — compact badges, no avatar/header */
+              <div key={group.messages[0].id} className="ml-[52px]">
+                <ToolUseBlockList
+                  toolUses={group.messages.map(msg => {
+                    const meta = (msg.metadata ?? {}) as Record<string, unknown>
+                    return {
+                      id: (meta.id as string) ?? msg.id,
+                      tool: (meta.tool as string) ?? 'unknown',
+                      args: meta.args as string | undefined,
+                      output: meta.output as string | undefined,
+                      status: (meta.status as 'done' | 'error') ?? 'done',
+                    }
+                  })}
+                />
               </div>
-
-              {/* Messages */}
-              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className={`text-sm font-semibold ${group.senderType === 'agent' ? 'text-indigo-400' : 'text-foreground'}`}>
-                    {group.senderType === 'user' ? 'You' : group.senderName}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {formatTime(new Date(group.messages[0].createdAt))}
-                  </span>
+            ) : (
+              /* Text group — full message with avatar + header */
+              <div key={group.messages[0].id} className="flex gap-3 hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors">
+                {/* Avatar */}
+                <div className="shrink-0 pt-0.5">
+                  {group.senderType === 'agent' ? (
+                    <AgentAvatar
+                      name={group.senderName}
+                      category={agentCategory ?? ''}
+                      iconUrl={agentIconUrl}
+                      size="sm"
+                    />
+                  ) : (
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback className="bg-primary/20 text-primary text-sm font-medium">
+                        {group.senderName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                 </div>
-                {/* Collect consecutive tool_result messages into blocks */}
-                {(() => {
-                  const elements: React.ReactNode[] = []
-                  let toolBatch: ToolUse[] = []
 
-                  const flushTools = () => {
-                    if (toolBatch.length > 0) {
-                      elements.push(
-                        <ToolUseBlockList key={`tools-${toolBatch[0].id}`} toolUses={[...toolBatch]} />
-                      )
-                      toolBatch = []
-                    }
-                  }
-
-                  for (const msg of group.messages) {
-                    if (msg.messageKind === 'tool_result' && msg.metadata) {
-                      const meta = msg.metadata as Record<string, unknown>
-                      toolBatch.push({
-                        id: (meta.id as string) ?? msg.id,
-                        tool: (meta.tool as string) ?? 'unknown',
-                        args: meta.args as string | undefined,
-                        output: meta.output as string | undefined,
-                        status: (meta.status as 'done' | 'error') ?? 'done',
-                      })
-                    } else {
-                      flushTools()
-                      elements.push(
-                        <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
-                          <MarkdownContent content={msg.content} />
-                        </div>
-                      )
-                    }
-                  }
-                  flushTools()
-                  return elements
-                })()}
+                {/* Messages */}
+                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-sm font-semibold ${group.senderType === 'agent' ? 'text-indigo-400' : 'text-foreground'}`}>
+                      {group.senderType === 'user' ? 'You' : group.senderName}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {formatTime(new Date(group.messages[0].createdAt))}
+                    </span>
+                  </div>
+                  {group.messages.map(msg => (
+                    <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
+                      <MarkdownContent content={msg.content} />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ),
+          )}
 
           {/* Streaming agent response */}
           {isStreaming && (streamingContent || streamingTools.length > 0) && (
