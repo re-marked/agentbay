@@ -147,6 +147,8 @@ export async function* listenForAgentTurn(
   let lifecycleEnded = false
   let doneSent = false
   let hadToolOutput = false
+  let lastSeenPartsCount = 0
+  let lifecycleGraceTimer: ReturnType<typeof setTimeout> | null = null
   const tools: ToolInfo[] = []
 
   // Create a message queue that the generator drains
@@ -183,6 +185,7 @@ export async function* listenForAgentTurn(
   const finalize = (content: string | null) => {
     clearTimeout(turnTimer)
     clearInterval(inactivityCheck)
+    if (lifecycleGraceTimer) clearTimeout(lifecycleGraceTimer)
     ws.removeListener('message', onMessage)
     ws.removeListener('close', onClose)
     ws.removeListener('error', onError)
@@ -278,9 +281,18 @@ export async function* listenForAgentTurn(
             finalize(deltaBuffer)
             return
           }
-          push({ type: 'error', data: { error: 'Agent finished without producing output' } })
-          finalize(null)
-          return
+          // Don't error immediately — chat events or tool events may still arrive
+          // after lifecycle end (race condition). Wait a grace period before giving up.
+          // The chat 'final' event is the true completion signal, not lifecycle end.
+          lifecycleGraceTimer = setTimeout(() => {
+            if (doneSent) return // Chat event arrived in time
+            if (deltaBuffer || hadToolOutput) {
+              finalize(deltaBuffer)
+              return
+            }
+            push({ type: 'error', data: { error: 'Agent finished without producing output' } })
+            finalize(null)
+          }, 10_000)
         }
       }
 
@@ -289,6 +301,18 @@ export async function* listenForAgentTurn(
         resetActivity()
         const payload = msg.payload
         const parts: Array<{ type: string; [key: string]: unknown }> = payload.message?.content ?? []
+
+        // Scan for NEW non-text parts (tool calls, tool results) — same as SSE gateway.
+        // This catches tools reported via chat content parts when the agent tool stream
+        // doesn't fire (e.g., tool-events cap not negotiated).
+        for (let i = lastSeenPartsCount; i < parts.length; i++) {
+          const part = parts[i]
+          if (part.type !== 'text') {
+            hadToolOutput = true
+          }
+        }
+        lastSeenPartsCount = parts.length
+
         const text = parts
           .filter((p) => p.type === 'text')
           .map((p) => (p as { type: string; text: string }).text)
@@ -358,6 +382,7 @@ export async function* listenForAgentTurn(
   } finally {
     clearTimeout(turnTimer)
     clearInterval(inactivityCheck)
+    if (lifecycleGraceTimer) clearTimeout(lifecycleGraceTimer)
     ws.removeListener('message', onMessage)
     ws.removeListener('close', onClose)
     ws.removeListener('error', onError)
