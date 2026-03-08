@@ -1,6 +1,6 @@
 import { getUser } from '@/lib/auth/get-user'
 import { createServiceClient } from '@agentbay/db/server'
-import { triggerProvision, triggerDestroy } from '@/lib/trigger'
+import { triggerProvision } from '@/lib/trigger'
 
 /**
  * POST /api/v1/debug/reprovision
@@ -42,16 +42,9 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle()
 
-  // 1. Destroy existing machine (if it has one)
-  if (instance.fly_app_name && instance.fly_app_name !== 'pending') {
-    try {
-      await triggerDestroy({ instanceId: instance.id })
-    } catch (err) {
-      console.error('[debug/reprovision] destroy failed:', err)
-    }
-  }
-
-  // 2. Reset instance to provisioning
+  // 1. Reset instance to provisioning
+  // NOTE: No explicit destroy needed — the provision task cleans up orphaned
+  // machines on the same Fly app before creating a new one.
   await service
     .from('agent_instances')
     .update({

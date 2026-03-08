@@ -24,6 +24,12 @@ export const destroyAgentMachine = task({
 
       if (!inst) throw new Error(`Instance not found: ${instanceId}`)
 
+      // Skip if instance was already reset to pending (e.g. by re-provision)
+      if (!inst.fly_app_name || inst.fly_app_name === 'pending') {
+        logger.info('Instance already in pending state, nothing to destroy', { instanceId })
+        return
+      }
+
       // Stop then destroy machine
       try {
         await fly.stopMachine(inst.fly_app_name, inst.fly_machine_id)
