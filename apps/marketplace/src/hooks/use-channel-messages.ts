@@ -162,9 +162,20 @@ export function useChannelMessages({
   )
 
   // Add a message optimistically (for streaming mode where the API route persists it)
+  // Skips if a real (non-optimistic) message with same content+sender already exists
   const addOptimisticMessage = useCallback(
     (msg: ChannelMessage) => {
-      setMessages(prev => [...prev, msg])
+      setMessages(prev => {
+        // Don't add if a real message already covers this
+        const isDuplicate = prev.some(
+          m => !m.id.startsWith('optimistic-')
+            && m.senderId === msg.senderId
+            && m.content === msg.content
+            && m.messageKind === msg.messageKind,
+        )
+        if (isDuplicate) return prev
+        return [...prev, msg]
+      })
     },
     [],
   )

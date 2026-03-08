@@ -22,6 +22,8 @@ export function useStreamingChat({ channelId, onDone }: UseStreamingChatOptions)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Ref mirror of streamingTools so processEvent (stable callback) can read current value
+  const toolsRef = useRef<ToolUse[]>([])
 
   const sendStreamingMessage = useCallback(
     async (content: string) => {
@@ -30,6 +32,7 @@ export function useStreamingChat({ channelId, onDone }: UseStreamingChatOptions)
       setStreamError(null)
       setStreamingContent('')
       setStreamingTools([])
+      toolsRef.current = []
 
       const abortController = new AbortController()
       abortRef.current = abortController
@@ -109,40 +112,47 @@ export function useStreamingChat({ channelId, onDone }: UseStreamingChatOptions)
           const state = data.state as string
 
           if (state === 'start') {
-            setStreamingTools(prev => [
-              ...prev,
-              {
-                id: toolId,
-                tool: data.tool ?? 'unknown',
-                args: data.args,
-                status: 'running',
-              },
-            ])
+            const newTool: ToolUse = {
+              id: toolId,
+              tool: data.tool ?? 'unknown',
+              args: data.args,
+              status: 'running',
+            }
+            setStreamingTools(prev => {
+              const next = [...prev, newTool]
+              toolsRef.current = next
+              return next
+            })
           } else if (state === 'end') {
-            setStreamingTools(prev =>
-              prev.map(t =>
+            setStreamingTools(prev => {
+              const next = prev.map(t =>
                 t.id === toolId
                   ? { ...t, status: 'done' as const, output: data.output }
                   : t,
-              ),
-            )
+              )
+              toolsRef.current = next
+              return next
+            })
           } else if (state === 'error') {
-            setStreamingTools(prev =>
-              prev.map(t =>
+            setStreamingTools(prev => {
+              const next = prev.map(t =>
                 t.id === toolId
                   ? { ...t, status: 'error' as const, output: data.error }
                   : t,
-              ),
-            )
+              )
+              toolsRef.current = next
+              return next
+            })
           }
           break
         }
 
         case 'done':
-          // Notify caller so it can inject an optimistic message before we clear
-          onDoneRef.current?.({ content: data.content ?? '', tools: [] })
+          // Notify caller so it can inject optimistic messages before we clear
+          onDoneRef.current?.({ content: data.content ?? '', tools: toolsRef.current })
           setStreamingContent('')
           setStreamingTools([])
+          toolsRef.current = []
           break
 
         case 'error':

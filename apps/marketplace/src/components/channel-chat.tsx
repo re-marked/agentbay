@@ -84,21 +84,48 @@ export function ChannelChat({
   } = useStreamingChat({
     channelId,
     onDone: useCallback((result: { content: string; tools: ToolUse[] }) => {
-      // Bridge the gap: inject optimistic agent message so content doesn't
+      // Bridge the gap: inject optimistic agent messages so content doesn't
       // disappear between streaming-clear and Realtime delivery
-      if (!result.content && result.tools.length === 0) return
       const agentId = Object.keys(members).find(id => members[id].type === 'agent')
       if (!agentId) return
-      addOptimisticMessage({
-        id: `optimistic-agent-${Date.now()}`,
-        channelId,
-        senderId: agentId,
-        content: result.content,
-        messageKind: 'text',
-        createdAt: new Date().toISOString(),
-        senderName: members[agentId]?.displayName ?? agentName ?? 'Agent',
-        senderType: 'agent',
-      })
+      const senderName = members[agentId]?.displayName ?? agentName ?? 'Agent'
+      const now = new Date().toISOString()
+
+      // Inject optimistic tool_result messages first (so they appear before text)
+      for (const tool of result.tools) {
+        if (tool.status === 'running') continue // skip incomplete tools
+        addOptimisticMessage({
+          id: `optimistic-tool-${tool.id}`,
+          channelId,
+          senderId: agentId,
+          content: `${tool.tool}${tool.args ? ` ${tool.args}` : ''}`,
+          messageKind: 'tool_result',
+          createdAt: now,
+          senderName,
+          senderType: 'agent',
+          metadata: {
+            id: tool.id,
+            tool: tool.tool,
+            args: tool.args,
+            output: tool.output,
+            status: tool.status,
+          },
+        })
+      }
+
+      // Then inject the text message
+      if (result.content) {
+        addOptimisticMessage({
+          id: `optimistic-agent-${Date.now()}`,
+          channelId,
+          senderId: agentId,
+          content: result.content,
+          messageKind: 'text',
+          createdAt: now,
+          senderName,
+          senderType: 'agent',
+        })
+      }
     }, [channelId, members, agentName, addOptimisticMessage]),
   })
 
