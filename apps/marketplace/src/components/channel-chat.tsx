@@ -41,6 +41,8 @@ interface MessageGroup {
   senderType: 'user' | 'agent'
   /** 'tools' = all tool_result, 'text' = all other kinds */
   groupKind: 'tools' | 'text'
+  /** True if this is the first group from this sender in a consecutive run */
+  showHeader: boolean
   messages: ChannelMessage[]
 }
 
@@ -54,11 +56,14 @@ function groupMessages(messages: ChannelMessage[]): MessageGroup[] {
     if (last && last.senderId === msg.senderId && last.groupKind === msgGroupKind) {
       last.messages.push(msg)
     } else {
+      // Show header only if sender changed from the previous group
+      const sameSenderAsPrev = last?.senderId === msg.senderId
       groups.push({
         senderId: msg.senderId,
         senderName: msg.senderName ?? 'Unknown',
         senderType: msg.senderType ?? 'user',
         groupKind: msgGroupKind,
+        showHeader: !sameSenderAsPrev,
         messages: [msg],
       })
     }
@@ -217,27 +222,10 @@ export function ChannelChat({
             </div>
           )}
 
-          {groups.map((group) =>
-            group.groupKind === 'tools' ? (
-              /* Tool group — compact badges, no avatar/header */
-              <div key={group.messages[0].id} className="ml-[52px]">
-                <ToolUseBlockList
-                  toolUses={group.messages.map(msg => {
-                    const meta = (msg.metadata ?? {}) as Record<string, unknown>
-                    return {
-                      id: (meta.id as string) ?? msg.id,
-                      tool: (meta.tool as string) ?? 'unknown',
-                      args: meta.args as string | undefined,
-                      output: meta.output as string | undefined,
-                      status: (meta.status as 'done' | 'error') ?? 'done',
-                    }
-                  })}
-                />
-              </div>
-            ) : (
-              /* Text group — full message with avatar + header */
-              <div key={group.messages[0].id} className="flex gap-3 hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors">
-                {/* Avatar */}
+          {groups.map((group) => (
+            <div key={group.messages[0].id} className={`flex gap-3 ${group.showHeader ? 'hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors' : ''}`}>
+              {/* Avatar column — show avatar on first group from sender, spacer on continuations */}
+              {group.showHeader ? (
                 <div className="shrink-0 pt-0.5">
                   {group.senderType === 'agent' ? (
                     <AgentAvatar
@@ -254,9 +242,13 @@ export function ChannelChat({
                     </Avatar>
                   )}
                 </div>
+              ) : (
+                <div className="w-10 shrink-0" />
+              )}
 
-                {/* Messages */}
-                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+              {/* Content */}
+              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                {group.showHeader && (
                   <div className="flex items-baseline gap-2">
                     <span className={`text-sm font-semibold ${group.senderType === 'agent' ? 'text-indigo-400' : 'text-foreground'}`}>
                       {group.senderType === 'user' ? 'You' : group.senderName}
@@ -265,15 +257,31 @@ export function ChannelChat({
                       {formatTime(new Date(group.messages[0].createdAt))}
                     </span>
                   </div>
-                  {group.messages.map(msg => (
+                )}
+
+                {group.groupKind === 'tools' ? (
+                  <ToolUseBlockList
+                    toolUses={group.messages.map(msg => {
+                      const meta = (msg.metadata ?? {}) as Record<string, unknown>
+                      return {
+                        id: (meta.id as string) ?? msg.id,
+                        tool: (meta.tool as string) ?? 'unknown',
+                        args: meta.args as string | undefined,
+                        output: meta.output as string | undefined,
+                        status: (meta.status as 'done' | 'error') ?? 'done',
+                      }
+                    })}
+                  />
+                ) : (
+                  group.messages.map(msg => (
                     <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
                       <MarkdownContent content={msg.content} />
                     </div>
-                  ))}
-                </div>
+                  ))
+                )}
               </div>
-            ),
-          )}
+            </div>
+          ))}
 
           {/* Streaming agent response */}
           {isStreaming && (streamingContent || streamingTools.length > 0) && (
