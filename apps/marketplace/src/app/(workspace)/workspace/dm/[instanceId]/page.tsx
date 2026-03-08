@@ -140,6 +140,7 @@ export default async function DirectMessagePage({
           channelId={channelId}
           userMemberId={userMemberId}
           agentMemberId={agentMemberId ?? undefined}
+          instanceId={instanceId}
           members={membersMap}
           agentName={agentName}
           agentCategory={agent.category}

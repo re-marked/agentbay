@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
 import { useStreamingChat } from '@/hooks/use-streaming-chat'
 import { MarkdownContent } from '@/components/markdown-content'
@@ -10,12 +10,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AgentAvatar } from '@/lib/agents'
+import { Square, RotateCw } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
 
 interface ChannelChatProps {
   channelId: string
   userMemberId: string
   agentMemberId?: string
+  instanceId?: string
   members: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }>
   agentName?: string
   agentCategory?: string
@@ -74,6 +76,7 @@ function groupMessages(messages: ChannelMessage[]): MessageGroup[] {
 export function ChannelChat({
   channelId,
   userMemberId,
+  instanceId,
   members,
   agentName,
   agentCategory,
@@ -93,6 +96,7 @@ export function ChannelChat({
     streamingTools,
     isStreaming,
     streamError,
+    cancelStream,
   } = useStreamingChat({
     channelId,
     onDone: useCallback((result: { content: string; tools: ToolUse[] }) => {
@@ -370,8 +374,8 @@ export function ChannelChat({
         </div>
       )}
 
-      {/* Input */}
-      <div className="px-4 pb-6 pt-2">
+      {/* Input + debug controls */}
+      <div className="px-4 pb-6 pt-2 flex flex-col gap-2">
         <Textarea
           ref={textareaRef}
           placeholder={placeholder ?? `Message ${agentName ?? '#channel'}`}
@@ -380,7 +384,65 @@ export function ChannelChat({
           className="bg-muted/50 border-muted-foreground/20 min-h-14 max-h-40 resize-none rounded-lg text-base disabled:opacity-50"
           rows={1}
         />
+
+        {/* Debug toolbar */}
+        {streaming && (
+          <div className="flex items-center gap-2">
+            {isStreaming && (
+              <button
+                type="button"
+                onClick={cancelStream}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+              >
+                <Square className="h-3 w-3" />
+                Stop
+              </button>
+            )}
+            {instanceId && (
+              <ReProvisionButton instanceId={instanceId} />
+            )}
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+function ReProvisionButton({ instanceId }: { instanceId: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+
+  const handleReprovision = async () => {
+    setState('loading')
+    try {
+      const res = await fetch('/api/v1/debug/reprovision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceId }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      }
+      setState('done')
+      setTimeout(() => setState('idle'), 3000)
+    } catch {
+      setState('error')
+      setTimeout(() => setState('idle'), 3000)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleReprovision}
+      disabled={state === 'loading'}
+      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors disabled:opacity-50"
+    >
+      <RotateCw className={`h-3 w-3 ${state === 'loading' ? 'animate-spin' : ''}`} />
+      {state === 'idle' && 'Re-provision'}
+      {state === 'loading' && 'Provisioning...'}
+      {state === 'done' && 'Triggered!'}
+      {state === 'error' && 'Failed'}
+    </button>
   )
 }
