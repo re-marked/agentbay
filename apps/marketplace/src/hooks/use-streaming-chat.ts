@@ -3,11 +3,20 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ToolUse } from '@/components/tool-use-block'
 
-interface UseStreamingChatOptions {
-  channelId: string
+interface StreamDoneResult {
+  content: string
+  tools: ToolUse[]
 }
 
-export function useStreamingChat({ channelId }: UseStreamingChatOptions) {
+interface UseStreamingChatOptions {
+  channelId: string
+  /** Called when the agent turn completes — use to inject an optimistic message before Realtime arrives */
+  onDone?: (result: StreamDoneResult) => void
+}
+
+export function useStreamingChat({ channelId, onDone }: UseStreamingChatOptions) {
+  const onDoneRef = useRef(onDone)
+  onDoneRef.current = onDone
   const [streamingContent, setStreamingContent] = useState('')
   const [streamingTools, setStreamingTools] = useState<ToolUse[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
@@ -130,7 +139,8 @@ export function useStreamingChat({ channelId }: UseStreamingChatOptions) {
         }
 
         case 'done':
-          // Clear streaming state — the persisted message will arrive via Realtime
+          // Notify caller so it can inject an optimistic message before we clear
+          onDoneRef.current?.({ content: data.content ?? '', tools: [] })
           setStreamingContent('')
           setStreamingTools([])
           break

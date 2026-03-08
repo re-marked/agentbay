@@ -40,6 +40,7 @@ export default async function DirectMessagePage({
   // For running agents, look up the DM channel and member info
   let channelId: string | null = null
   let userMemberId: string | null = null
+  let agentMemberId: string | null = null
   let membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }> = {}
 
   if (!isNotReady) {
@@ -58,6 +59,7 @@ export default async function DirectMessagePage({
         .maybeSingle()
 
       if (agentMember) {
+        agentMemberId = agentMember.id
         // Find DM channel between user and agent
         const { data: agentChannels } = await service
           .from('channel_members')
@@ -137,6 +139,7 @@ export default async function DirectMessagePage({
         <ChannelChat
           channelId={channelId}
           userMemberId={userMemberId}
+          agentMemberId={agentMemberId ?? undefined}
           members={membersMap}
           agentName={agentName}
           agentCategory={agent.category}

@@ -81,7 +81,26 @@ export function ChannelChat({
     streamingTools,
     isStreaming,
     streamError,
-  } = useStreamingChat({ channelId })
+  } = useStreamingChat({
+    channelId,
+    onDone: useCallback((result: { content: string; tools: ToolUse[] }) => {
+      // Bridge the gap: inject optimistic agent message so content doesn't
+      // disappear between streaming-clear and Realtime delivery
+      if (!result.content && result.tools.length === 0) return
+      const agentId = Object.keys(members).find(id => members[id].type === 'agent')
+      if (!agentId) return
+      addOptimisticMessage({
+        id: `optimistic-agent-${Date.now()}`,
+        channelId,
+        senderId: agentId,
+        content: result.content,
+        messageKind: 'text',
+        createdAt: new Date().toISOString(),
+        senderName: members[agentId]?.displayName ?? agentName ?? 'Agent',
+        senderType: 'agent',
+      })
+    }, [channelId, members, agentName, addOptimisticMessage]),
+  })
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
