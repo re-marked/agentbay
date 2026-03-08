@@ -6,7 +6,7 @@ import { PERSONAL_AI_ROLE } from './personal-ai-role'
 
 // v2026.3.12-dev: workspace CLI scripts (workspace-msg, workspace-task) confirmed in image.
 // Never use :latest — fly deploy doesn't update it, so it's always stale.
-const BASE_IMAGE = process.env.FLY_AGENT_BASE_IMAGE ?? 'registry.fly.io/agentbay-agent-base:v2026.3.12-dev'
+const BASE_IMAGE = process.env.FLY_AGENT_BASE_IMAGE ?? 'registry.fly.io/agentbay-agent-base:v2026.3.13-dev'
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? 'personal'
 const FLY_REGION = process.env.FLY_REGION ?? 'ord'
 
@@ -213,7 +213,7 @@ export const provisionAgentMachine = task({
       // When only Routeway is configured (no BYOK keys), default to a free tier model.
       const isRouteOnlySetup = keyEnv.ROUTEWAY_API_KEY && !keyEnv.GEMINI_API_KEY && !keyEnv.OPENAI_API_KEY && !keyEnv.ANTHROPIC_API_KEY
       const resolvedModel = isRouteOnlySetup && !userDefaultModel
-        ? (process.env.PLATFORM_ROUTEWAY_DEFAULT_MODEL ?? 'routeway/minimax-m2.5')
+        ? (process.env.PLATFORM_ROUTEWAY_DEFAULT_MODEL ?? 'routeway/gpt-5-mini')
         : defaultModel
       const modelOverrides = {
         agents: { defaults: { model: { primary: resolvedModel }, sandbox: { mode: 'off' } } },
