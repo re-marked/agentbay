@@ -189,6 +189,10 @@ export async function POST(request: Request) {
   // 9. Stream from agent — tools persist as real messages, text persists on completion
   const persistedToolIds = new Set<string>()
 
+  // Stable session key per channel — OpenClaw maintains conversation history per session.
+  // Same channel = same conversation context across messages.
+  const sessionKey = `agent:main:dm-${channelId}`
+
   const stream = streamFromAgent(
     flyAppName,
     gatewayToken,
@@ -247,6 +251,7 @@ export async function POST(request: Request) {
       },
     },
     request.signal,
+    sessionKey,
   )
 
   return new Response(stream, {

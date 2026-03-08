@@ -39,6 +39,8 @@ export function streamFromAgent(
   messages: ChatMessage[],
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
+  /** Stable session key — same key = same conversation in OpenClaw */
+  sessionKey?: string,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
 
@@ -68,8 +70,8 @@ export function streamFromAgent(
         // Connect to agent
         ws = await connectToAgent(flyAppName, gatewayToken)
 
-        // Generate a unique session key for this conversation
-        const sessionKey = `agent:main:session-v2-${Date.now()}`
+        // Use provided stable session key, or fall back to a unique one
+        const resolvedSessionKey = sessionKey ?? `agent:main:session-v2-${Date.now()}`
 
         // Send the last user message
         const lastMessage = messages[messages.length - 1]
@@ -80,7 +82,7 @@ export function streamFromAgent(
           return
         }
 
-        sendChatMessage(ws, sessionKey, lastMessage.content)
+        sendChatMessage(ws, resolvedSessionKey, lastMessage.content)
 
         // Listen for the agent's turn and stream events
         let finalContent = ''
