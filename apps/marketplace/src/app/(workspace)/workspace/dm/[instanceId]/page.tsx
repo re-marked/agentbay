@@ -142,6 +142,7 @@ export default async function DirectMessagePage({
           agentCategory={agent.category}
           agentIconUrl={agent.icon_url}
           placeholder={`Message ${agentName}`}
+          streaming
         />
       ) : (
         <div className="flex flex-1 items-center justify-center">

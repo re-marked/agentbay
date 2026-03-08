@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
+import { useStreamingChat } from '@/hooks/use-streaming-chat'
 import { MarkdownContent } from '@/components/markdown-content'
+import { ToolUseBlockList, type ToolUse } from '@/components/tool-use-block'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -13,11 +15,13 @@ import type { KeyboardEvent } from 'react'
 interface ChannelChatProps {
   channelId: string
   userMemberId: string
+  agentMemberId?: string
   members: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }>
   agentName?: string
   agentCategory?: string
   agentIconUrl?: string | null
   placeholder?: string
+  streaming?: boolean
 }
 
 function formatTime(date: Date): string {
@@ -63,33 +67,68 @@ export function ChannelChat({
   agentCategory,
   agentIconUrl,
   placeholder,
+  streaming = false,
 }: ChannelChatProps) {
-  const { messages, isLoading, isSending, error, sendMessage } = useChannelMessages({
+  const { messages, isLoading, isSending, error, sendMessage, addOptimisticMessage } = useChannelMessages({
     channelId,
     userMemberId,
     members,
   })
 
+  const {
+    sendStreamingMessage,
+    streamingContent,
+    streamingTools,
+    isStreaming,
+    streamError,
+  } = useStreamingChat({ channelId })
+
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll to bottom on new messages
+  const isBusy = streaming ? isStreaming : isSending
+  const displayError = streaming ? (streamError ?? error) : error
+
+  // Auto-scroll to bottom on new messages or streaming content
   useEffect(() => {
     if (scrollRef.current) {
       const el = scrollRef.current
-      // Use requestAnimationFrame to ensure DOM has updated
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight
       })
     }
-  }, [messages])
+  }, [messages, streamingContent, streamingTools])
+
+  const handleSend = useCallback(
+    (value: string) => {
+      if (!value.trim() || isBusy) return
+
+      if (streaming) {
+        // In streaming mode: add optimistic user message, then stream
+        addOptimisticMessage({
+          id: `optimistic-${Date.now()}`,
+          channelId,
+          senderId: userMemberId,
+          content: value.trim(),
+          messageKind: 'text',
+          createdAt: new Date().toISOString(),
+          senderName: members[userMemberId]?.displayName ?? 'You',
+          senderType: 'user',
+        })
+        sendStreamingMessage(value.trim())
+      } else {
+        sendMessage(value)
+      }
+    },
+    [streaming, isBusy, channelId, userMemberId, members, sendMessage, sendStreamingMessage, addOptimisticMessage],
+  )
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const value = textareaRef.current?.value.trim()
       if (!value) return
-      sendMessage(value)
+      handleSend(value)
       if (textareaRef.current) textareaRef.current.value = ''
     }
   }
@@ -117,7 +156,7 @@ export function ChannelChat({
       {/* Messages area */}
       <ScrollArea className="flex-1 min-h-0">
         <div ref={scrollRef} className="flex flex-col gap-4 px-4 py-4">
-          {messages.length === 0 && (
+          {messages.length === 0 && !isStreaming && (
             <div className="flex flex-1 items-center justify-center py-20">
               <p className="text-sm text-muted-foreground">
                 Send a message to start the conversation
@@ -158,14 +197,73 @@ export function ChannelChat({
                 {group.messages.map(msg => (
                   <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
                     <MarkdownContent content={msg.content} />
+                    {/* Tool badges from persisted metadata */}
+                    {Array.isArray(msg.metadata?.tools) && (
+                      <ToolUseBlockList toolUses={msg.metadata.tools as ToolUse[]} />
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           ))}
 
-          {/* Typing indicator */}
-          {isSending && (
+          {/* Streaming agent response */}
+          {isStreaming && (streamingContent || streamingTools.length > 0) && (
+            <div className="flex gap-3 -mx-2 px-2 py-1 rounded-md">
+              <div className="shrink-0 pt-0.5">
+                <AgentAvatar
+                  name={agentName ?? 'Agent'}
+                  category={agentCategory ?? ''}
+                  iconUrl={agentIconUrl}
+                  size="sm"
+                />
+              </div>
+              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-indigo-400">
+                    {agentName ?? 'Agent'}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Now
+                  </span>
+                </div>
+                {streamingContent && (
+                  <div className="text-sm text-foreground/90 leading-relaxed">
+                    <MarkdownContent content={streamingContent} />
+                  </div>
+                )}
+                {streamingTools.length > 0 && (
+                  <ToolUseBlockList toolUses={streamingTools} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Typing indicator — only show when streaming mode is active but no content yet */}
+          {isStreaming && !streamingContent && streamingTools.length === 0 && (
+            <div className="flex gap-3 -mx-2 px-2 py-1">
+              <div className="shrink-0 pt-0.5">
+                <AgentAvatar
+                  name={agentName ?? 'Agent'}
+                  category={agentCategory ?? ''}
+                  iconUrl={agentIconUrl}
+                  size="sm"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 pt-2">
+                {[0, 1, 2].map(i => (
+                  <div
+                    key={i}
+                    className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce"
+                    style={{ animationDelay: `${i * 150}ms` }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Non-streaming typing indicator (legacy) */}
+          {!streaming && isSending && (
             <div className="flex gap-3 -mx-2 px-2 py-1">
               <div className="shrink-0 pt-0.5">
                 <AgentAvatar
@@ -190,9 +288,9 @@ export function ChannelChat({
       </ScrollArea>
 
       {/* Error banner */}
-      {error && (
+      {displayError && (
         <div className="px-4 py-2 text-sm text-destructive bg-destructive/10 border-t border-destructive/20">
-          {error}
+          {displayError}
         </div>
       )}
 
@@ -202,7 +300,7 @@ export function ChannelChat({
           ref={textareaRef}
           placeholder={placeholder ?? `Message ${agentName ?? '#channel'}`}
           onKeyDown={handleKeyDown}
-          disabled={isSending}
+          disabled={isBusy}
           className="bg-muted/50 border-muted-foreground/20 min-h-14 max-h-40 resize-none rounded-lg text-base disabled:opacity-50"
           rows={1}
         />
