@@ -12,6 +12,7 @@ export interface ChannelMessage {
   createdAt: string
   senderName?: string
   senderType?: 'user' | 'agent'
+  metadata?: Record<string, unknown> | null
 }
 
 interface UseChannelMessagesOptions {
@@ -38,7 +39,7 @@ export function useChannelMessages({
       const supabase = supabaseRef.current
       const { data, error: fetchErr } = await supabase
         .from('channel_messages')
-        .select('id, channel_id, sender_id, content, message_kind, created_at')
+        .select('id, channel_id, sender_id, content, message_kind, metadata, created_at')
         .eq('channel_id', channelId)
         .is('deleted_at', null)
         .order('created_at', { ascending: true })
@@ -50,8 +51,9 @@ export function useChannelMessages({
         return
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setMessages(
-        (data ?? []).map((row: { id: string; channel_id: string; sender_id: string; content: string; message_kind: string; created_at: string }) => ({
+        (data ?? []).map((row: any) => ({
           id: row.id,
           channelId: row.channel_id,
           senderId: row.sender_id,
@@ -60,6 +62,7 @@ export function useChannelMessages({
           createdAt: row.created_at,
           senderName: members[row.sender_id]?.displayName ?? 'Unknown',
           senderType: (members[row.sender_id]?.type ?? 'user') as 'user' | 'agent',
+          metadata: row.metadata,
         }))
       )
       setIsLoading(false)
@@ -94,6 +97,7 @@ export function useChannelMessages({
             createdAt: row.created_at as string,
             senderName: members[senderId]?.displayName ?? 'Unknown',
             senderType: (members[senderId]?.type ?? 'user') as 'user' | 'agent',
+            metadata: (row.metadata as Record<string, unknown>) ?? null,
           }
 
           // Add message if not already present (dedup with optimistic updates)
@@ -157,5 +161,24 @@ export function useChannelMessages({
     [channelId, userMemberId, members]
   )
 
-  return { messages, isLoading, isSending, error, sendMessage }
+  // Add a message optimistically (for streaming mode where the API route persists it)
+  // Skips if a real (non-optimistic) message with same content+sender already exists
+  const addOptimisticMessage = useCallback(
+    (msg: ChannelMessage) => {
+      setMessages(prev => {
+        // Don't add if a real message already covers this
+        const isDuplicate = prev.some(
+          m => !m.id.startsWith('optimistic-')
+            && m.senderId === msg.senderId
+            && m.content === msg.content
+            && m.messageKind === msg.messageKind,
+        )
+        if (isDuplicate) return prev
+        return [...prev, msg]
+      })
+    },
+    [],
+  )
+
+  return { messages, isLoading, isSending, error, sendMessage, addOptimisticMessage }
 }

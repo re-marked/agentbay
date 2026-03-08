@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
+import { useStreamingChat } from '@/hooks/use-streaming-chat'
 import { MarkdownContent } from '@/components/markdown-content'
+import { ToolUseBlockList, type ToolUse } from '@/components/tool-use-block'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -13,11 +15,13 @@ import type { KeyboardEvent } from 'react'
 interface ChannelChatProps {
   channelId: string
   userMemberId: string
+  agentMemberId?: string
   members: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }>
   agentName?: string
   agentCategory?: string
   agentIconUrl?: string | null
   placeholder?: string
+  streaming?: boolean
 }
 
 function formatTime(date: Date): string {
@@ -35,19 +39,31 @@ interface MessageGroup {
   senderId: string
   senderName: string
   senderType: 'user' | 'agent'
+  /** 'tools' = all tool_result, 'text' = all other kinds */
+  groupKind: 'tools' | 'text'
+  /** True if this is the first group from this sender in a consecutive run */
+  showHeader: boolean
   messages: ChannelMessage[]
 }
 
 function groupMessages(messages: ChannelMessage[]): MessageGroup[] {
   return messages.reduce<MessageGroup[]>((groups, msg) => {
     const last = groups[groups.length - 1]
-    if (last && last.senderId === msg.senderId) {
+    const isToolMsg = msg.messageKind === 'tool_result'
+    const msgGroupKind = isToolMsg ? 'tools' : 'text'
+
+    // Continue group only if same sender AND same kind category
+    if (last && last.senderId === msg.senderId && last.groupKind === msgGroupKind) {
       last.messages.push(msg)
     } else {
+      // Show header only if sender changed from the previous group
+      const sameSenderAsPrev = last?.senderId === msg.senderId
       groups.push({
         senderId: msg.senderId,
         senderName: msg.senderName ?? 'Unknown',
         senderType: msg.senderType ?? 'user',
+        groupKind: msgGroupKind,
+        showHeader: !sameSenderAsPrev,
         messages: [msg],
       })
     }
@@ -63,33 +79,114 @@ export function ChannelChat({
   agentCategory,
   agentIconUrl,
   placeholder,
+  streaming = false,
 }: ChannelChatProps) {
-  const { messages, isLoading, isSending, error, sendMessage } = useChannelMessages({
+  const { messages, isLoading, isSending, error, sendMessage, addOptimisticMessage } = useChannelMessages({
     channelId,
     userMemberId,
     members,
   })
 
+  const {
+    sendStreamingMessage,
+    streamingContent,
+    streamingTools,
+    isStreaming,
+    streamError,
+  } = useStreamingChat({
+    channelId,
+    onDone: useCallback((result: { content: string; tools: ToolUse[] }) => {
+      // Bridge the gap: inject optimistic agent messages so content doesn't
+      // disappear between streaming-clear and Realtime delivery
+      const agentId = Object.keys(members).find(id => members[id].type === 'agent')
+      if (!agentId) return
+      const senderName = members[agentId]?.displayName ?? agentName ?? 'Agent'
+      const now = new Date().toISOString()
+
+      // Inject optimistic tool_result messages first (so they appear before text)
+      for (const tool of result.tools) {
+        if (tool.status === 'running') continue // skip incomplete tools
+        addOptimisticMessage({
+          id: `optimistic-tool-${tool.id}`,
+          channelId,
+          senderId: agentId,
+          content: `${tool.tool}${tool.args ? ` ${tool.args}` : ''}`,
+          messageKind: 'tool_result',
+          createdAt: now,
+          senderName,
+          senderType: 'agent',
+          metadata: {
+            id: tool.id,
+            tool: tool.tool,
+            args: tool.args,
+            output: tool.output,
+            status: tool.status,
+          },
+        })
+      }
+
+      // Then inject the text message
+      if (result.content) {
+        addOptimisticMessage({
+          id: `optimistic-agent-${Date.now()}`,
+          channelId,
+          senderId: agentId,
+          content: result.content,
+          messageKind: 'text',
+          createdAt: now,
+          senderName,
+          senderType: 'agent',
+        })
+      }
+    }, [channelId, members, agentName, addOptimisticMessage]),
+  })
+
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll to bottom on new messages
+  const isBusy = streaming ? isStreaming : isSending
+  const displayError = streaming ? (streamError ?? error) : error
+
+  // Auto-scroll to bottom on new messages or streaming content
   useEffect(() => {
     if (scrollRef.current) {
       const el = scrollRef.current
-      // Use requestAnimationFrame to ensure DOM has updated
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight
       })
     }
-  }, [messages])
+  }, [messages, streamingContent, streamingTools])
+
+  const handleSend = useCallback(
+    (value: string) => {
+      if (!value.trim() || isBusy) return
+
+      if (streaming) {
+        // In streaming mode: add optimistic user message, then stream
+        addOptimisticMessage({
+          id: `optimistic-${Date.now()}`,
+          channelId,
+          senderId: userMemberId,
+          content: value.trim(),
+          messageKind: 'text',
+          createdAt: new Date().toISOString(),
+          senderName: members[userMemberId]?.displayName ?? 'You',
+          senderType: 'user',
+        })
+        sendStreamingMessage(value.trim())
+      } else {
+        sendMessage(value)
+      }
+    },
+    [streaming, isBusy, channelId, userMemberId, members, sendMessage, sendStreamingMessage, addOptimisticMessage],
+  )
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const value = textareaRef.current?.value.trim()
       if (!value) return
-      sendMessage(value)
+      handleSend(value)
       if (textareaRef.current) textareaRef.current.value = ''
     }
   }
@@ -117,7 +214,7 @@ export function ChannelChat({
       {/* Messages area */}
       <ScrollArea className="flex-1 min-h-0">
         <div ref={scrollRef} className="flex flex-col gap-4 px-4 py-4">
-          {messages.length === 0 && (
+          {messages.length === 0 && !isStreaming && (
             <div className="flex flex-1 items-center justify-center py-20">
               <p className="text-sm text-muted-foreground">
                 Send a message to start the conversation
@@ -126,46 +223,123 @@ export function ChannelChat({
           )}
 
           {groups.map((group) => (
-            <div key={group.messages[0].id} className="flex gap-3 hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors">
-              {/* Avatar */}
-              <div className="shrink-0 pt-0.5">
-                {group.senderType === 'agent' ? (
-                  <AgentAvatar
-                    name={group.senderName}
-                    category={agentCategory ?? ''}
-                    iconUrl={agentIconUrl}
-                    size="sm"
+            <div key={group.messages[0].id} className={`flex gap-3 ${group.showHeader ? 'hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors' : ''}`}>
+              {/* Avatar column — show avatar on first group from sender, spacer on continuations */}
+              {group.showHeader ? (
+                <div className="shrink-0 pt-0.5">
+                  {group.senderType === 'agent' ? (
+                    <AgentAvatar
+                      name={group.senderName}
+                      category={agentCategory ?? ''}
+                      iconUrl={agentIconUrl}
+                      size="sm"
+                    />
+                  ) : (
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback className="bg-primary/20 text-primary text-sm font-medium">
+                        {group.senderName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
+              ) : (
+                <div className="w-10 shrink-0" />
+              )}
+
+              {/* Content */}
+              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                {group.showHeader && (
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-sm font-semibold ${group.senderType === 'agent' ? 'text-indigo-400' : 'text-foreground'}`}>
+                      {group.senderType === 'user' ? 'You' : group.senderName}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {formatTime(new Date(group.messages[0].createdAt))}
+                    </span>
+                  </div>
+                )}
+
+                {group.groupKind === 'tools' ? (
+                  <ToolUseBlockList
+                    toolUses={group.messages.map(msg => {
+                      const meta = (msg.metadata ?? {}) as Record<string, unknown>
+                      return {
+                        id: (meta.id as string) ?? msg.id,
+                        tool: (meta.tool as string) ?? 'unknown',
+                        args: meta.args as string | undefined,
+                        output: meta.output as string | undefined,
+                        status: (meta.status as 'done' | 'error') ?? 'done',
+                      }
+                    })}
                   />
                 ) : (
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-primary/20 text-primary text-sm font-medium">
-                      {group.senderName.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+                  group.messages.map(msg => (
+                    <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
+                      <MarkdownContent content={msg.content} />
+                    </div>
+                  ))
                 )}
-              </div>
-
-              {/* Messages */}
-              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className={`text-sm font-semibold ${group.senderType === 'agent' ? 'text-indigo-400' : 'text-foreground'}`}>
-                    {group.senderType === 'user' ? 'You' : group.senderName}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {formatTime(new Date(group.messages[0].createdAt))}
-                  </span>
-                </div>
-                {group.messages.map(msg => (
-                  <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
-                    <MarkdownContent content={msg.content} />
-                  </div>
-                ))}
               </div>
             </div>
           ))}
 
-          {/* Typing indicator */}
-          {isSending && (
+          {/* Streaming agent response */}
+          {isStreaming && (streamingContent || streamingTools.length > 0) && (
+            <div className="flex gap-3 -mx-2 px-2 py-1 rounded-md">
+              <div className="shrink-0 pt-0.5">
+                <AgentAvatar
+                  name={agentName ?? 'Agent'}
+                  category={agentCategory ?? ''}
+                  iconUrl={agentIconUrl}
+                  size="sm"
+                />
+              </div>
+              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-indigo-400">
+                    {agentName ?? 'Agent'}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Now
+                  </span>
+                </div>
+                {streamingContent && (
+                  <div className="text-sm text-foreground/90 leading-relaxed">
+                    <MarkdownContent content={streamingContent} />
+                  </div>
+                )}
+                {streamingTools.length > 0 && (
+                  <ToolUseBlockList toolUses={streamingTools} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Typing indicator — only show when streaming mode is active but no content yet */}
+          {isStreaming && !streamingContent && streamingTools.length === 0 && (
+            <div className="flex gap-3 -mx-2 px-2 py-1">
+              <div className="shrink-0 pt-0.5">
+                <AgentAvatar
+                  name={agentName ?? 'Agent'}
+                  category={agentCategory ?? ''}
+                  iconUrl={agentIconUrl}
+                  size="sm"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 pt-2">
+                {[0, 1, 2].map(i => (
+                  <div
+                    key={i}
+                    className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce"
+                    style={{ animationDelay: `${i * 150}ms` }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Non-streaming typing indicator (legacy) */}
+          {!streaming && isSending && (
             <div className="flex gap-3 -mx-2 px-2 py-1">
               <div className="shrink-0 pt-0.5">
                 <AgentAvatar
@@ -190,9 +364,9 @@ export function ChannelChat({
       </ScrollArea>
 
       {/* Error banner */}
-      {error && (
+      {displayError && (
         <div className="px-4 py-2 text-sm text-destructive bg-destructive/10 border-t border-destructive/20">
-          {error}
+          {displayError}
         </div>
       )}
 
@@ -202,7 +376,7 @@ export function ChannelChat({
           ref={textareaRef}
           placeholder={placeholder ?? `Message ${agentName ?? '#channel'}`}
           onKeyDown={handleKeyDown}
-          disabled={isSending}
+          disabled={isBusy}
           className="bg-muted/50 border-muted-foreground/20 min-h-14 max-h-40 resize-none rounded-lg text-base disabled:opacity-50"
           rows={1}
         />

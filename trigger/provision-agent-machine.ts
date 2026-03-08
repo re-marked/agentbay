@@ -152,7 +152,21 @@ export const provisionAgentMachine = task({
       await allocatePublicIPs(appName)
       logger.info('Fly app ready with IPs', { appName: app.name })
 
-      // ── 4. Clean up orphaned volumes then create a fresh one ──────────────
+      // ── 4. Clean up orphaned machines and volumes ──────────────────────────
+      // On retry after partial success, a machine from the previous attempt may
+      // still be running with a different gateway token. Destroy all existing
+      // machines so the new one is the sole instance (prevents load-balancing
+      // between machines with different tokens → "Unauthorized" errors).
+      const existingMachines = await fly.listMachines(appName)
+      for (const m of existingMachines) {
+        try {
+          await fly.deleteMachine(appName, m.id, true)
+          logger.info('Destroyed orphaned machine', { machineId: m.id, state: m.state })
+        } catch (err) {
+          logger.warn('Failed to destroy orphaned machine', { machineId: m.id, error: String(err) })
+        }
+      }
+
       // Orphaned volumes are pinned to hosts that may be full, causing 412
       // "insufficient resources" errors. Delete them so Fly picks a healthy host.
       const existingVolumes = await fly.listVolumes(appName)
@@ -183,16 +197,17 @@ export const provisionAgentMachine = task({
         roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
         roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
         roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(PERSONAL_AI_ROLE.openclawOverrides)
-        // Workspace context for Router API access
-        if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
-        if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
-        if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
-        if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
       } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
         roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(role.openclawOverrides)
       }
+
+      // Workspace context — all agents get Router API access + identity
+      if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
+      if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
+      if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
+      if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
 
       // Build OpenClaw config overrides to set the user's preferred model.
       // When only Routeway is configured (no BYOK keys), default to a free tier model.

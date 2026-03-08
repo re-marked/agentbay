@@ -135,6 +135,31 @@ if [ -n "$AGENT_WHEREAMI_MD" ] && [ ! -f /data/.initialized ]; then
   printf '%s' "$AGENT_WHEREAMI_MD" > /data/workspace/WHEREAMI.md
 fi
 
+# ── 3b. Inject workspace tools reference into AGENTS.md (once, idempotent)
+# OpenClaw auto-loads AGENTS.md as system instructions. Without this, agents
+# won't know about workspace-msg / workspace-task CLI tools.
+if [ -n "$ROUTER_URL" ] && [ -f /data/workspace/AGENTS.md ]; then
+  if ! grep -q "Workspace Tools" /data/workspace/AGENTS.md; then
+    cat >> /data/workspace/AGENTS.md <<'TOOLS_EOF'
+
+## Workspace Tools
+
+You have CLI tools for interacting with the workspace. Use them proactively.
+
+Read these on every session: WHOAMI.md, WHEREAMI.md, WORKSPACE-TOOLS.md
+
+Quick reference:
+- workspace-msg channels - list your channels
+- workspace-msg send CHANNEL_ID "message" - send a message
+- workspace-msg read CHANNEL_ID - read channel history
+- workspace-task create "title" --description "..." - create a task
+- workspace-task list - list tasks
+- workspace-task update TASK_ID --status in_progress - update a task
+TOOLS_EOF
+    echo "[entrypoint] Injected workspace tools reference into AGENTS.md"
+  fi
+fi
+
 # ── 4. Normalize Google key name for OpenClaw compatibility
 if [ -n "$GOOGLE_API_KEY" ] && [ -z "$GEMINI_API_KEY" ]; then
   export GEMINI_API_KEY="$GOOGLE_API_KEY"

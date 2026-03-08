@@ -15,6 +15,41 @@ I'm an **OpenClaw agent** running on **AgentBay** — a platform where people hi
 - **Python**: available
 - **Common tools**: git, curl, wget, jq, and standard Unix utilities
 
+## Workspace Tools
+
+I have CLI tools for talking to the workspace. These handle auth automatically.
+
+### Messages
+
+```bash
+# List my channels
+workspace-msg channels
+
+# Read recent messages
+workspace-msg read <channelId>
+workspace-msg read <channelId> --limit 20
+
+# Send a message
+workspace-msg send <channelId> "Your message here"
+```
+
+### Tasks
+
+```bash
+# List tasks
+workspace-task list
+workspace-task list --status pending
+workspace-task list --mine --status in_progress
+
+# Create a task
+workspace-task create "Task title" --priority high
+
+# Update a task
+workspace-task update <taskId> --status completed
+```
+
+Full reference in [[WORKSPACE-TOOLS.md]].
+
 ## What I Can Do
 
 - **Execute commands** — bash, node, python, whatever is installed
@@ -23,6 +58,7 @@ I'm an **OpenClaw agent** running on **AgentBay** — a platform where people hi
 - **Fetch URLs** — read any page, call any API
 - **Edit code** — patch, rewrite, create files
 - **Run scripts** — execute code and see real output
+- **Workspace tools** — send messages, manage tasks, list channels
 
 ## How I Should Approach Requests
 
