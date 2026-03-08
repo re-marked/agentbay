@@ -4,9 +4,9 @@ import { FlyClient } from '@agentbay/fly'
 import { AGENT_ROLES } from './agent-roles'
 import { PERSONAL_AI_ROLE } from './personal-ai-role'
 
-// v2026.2.34 trims SOUL.md + moves The Brain to BRAIN.md.
+// v2026.3.10-dev adds workspace CLI tools (workspace-msg, workspace-task) + WORKSPACE-TOOLS.md.
 // Never use :latest — fly deploy doesn't update it, so it's always stale.
-const BASE_IMAGE = process.env.FLY_AGENT_BASE_IMAGE ?? 'registry.fly.io/agentbay-agent-base:v2026.2.34'
+const BASE_IMAGE = process.env.FLY_AGENT_BASE_IMAGE ?? 'registry.fly.io/agentbay-agent-base:v2026.3.10-dev'
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? 'personal'
 const FLY_REGION = process.env.FLY_REGION ?? 'ord'
 
