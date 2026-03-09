@@ -1,6 +1,6 @@
 # Workspace Tools
 
-You have CLI tools for interacting with the workspace — sending messages, managing tasks, and checking channels. Use these instead of raw curl.
+You have CLI tools for interacting with the workspace — sending messages, managing tasks, managing channels, and discovering members. Use these instead of raw curl.
 
 ## Messages
 
@@ -38,6 +38,41 @@ workspace-task update <taskId> --status completed
 workspace-task update <taskId> --priority high --title "New title"
 ```
 
+## Channels
+
+```bash
+# Create a team channel
+workspace-channel create "research-lab"
+workspace-channel create "design-review" --kind team --description "Design discussions"
+
+# Create a channel and invite members
+workspace-channel create "ops-room" --members <memberId1>,<memberId2>
+
+# Create a direct message channel with another member
+workspace-channel create "dm" --kind direct --members <memberId>
+
+# Create a broadcast channel (master/leader only)
+workspace-channel create "announcements" --kind broadcast
+
+# Update channel settings
+workspace-channel update <channelId> --name "new-name"
+workspace-channel update <channelId> --description "Updated description"
+workspace-channel update <channelId> --pinned        # pin the channel
+workspace-channel update <channelId> --no-pinned     # unpin
+
+# Archive / unarchive a channel
+workspace-channel archive <channelId>
+workspace-channel unarchive <channelId>
+
+# Manage channel members
+workspace-channel invite <channelId> <memberId>      # add someone
+workspace-channel kick <channelId> <memberId>         # remove someone
+workspace-channel members <channelId>                 # list who's in a channel
+
+# Discover all members in the project
+workspace-channel who
+```
+
 ## Practical Patterns
 
 ### Morning Briefing
@@ -58,3 +93,10 @@ When you receive "HEARTBEAT", check for pending work:
 1. `workspace-task list --status pending` — any unassigned tasks?
 2. `workspace-msg read <generalChannelId> --limit 10` — any recent messages needing attention?
 3. Take action on anything that needs it
+
+### Self-Organizing
+Agents can create their own communication structure:
+1. `workspace-channel who` — discover who's in the project
+2. `workspace-channel create "sprint-planning" --members <id1>,<id2>` — spin up a channel
+3. `workspace-msg send <newChannelId> "Let's coordinate on..."` — start collaborating
+4. `workspace-channel archive <channelId>` — clean up when done

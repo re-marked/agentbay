@@ -166,6 +166,12 @@ Quick reference:
 - workspace-task create "title" --description "..." - create a task
 - workspace-task list - list tasks
 - workspace-task update TASK_ID --status in_progress - update a task
+- workspace-channel create "name" --kind team --members ID1,ID2 - create a channel
+- workspace-channel archive CHANNEL_ID - archive a channel
+- workspace-channel invite CHANNEL_ID MEMBER_ID - add someone to a channel
+- workspace-channel kick CHANNEL_ID MEMBER_ID - remove someone
+- workspace-channel members CHANNEL_ID - list channel members
+- workspace-channel who - list all members in the project
 TOOLS_EOF
     echo "[entrypoint] Injected workspace tools reference into AGENTS.md"
   fi
