@@ -18,17 +18,19 @@ export default async function ChannelPage({
   const { channelId } = await params
   const service = createServiceClient()
 
-  // Load channel
-  const { data: channel } = await service
-    .from('channels')
-    .select('id, project_id, name, kind, description')
-    .eq('id', channelId)
-    .single()
+  // Load channel + project membership in parallel
+  const [{ data: channel }, projectInfo] = await Promise.all([
+    service
+      .from('channels')
+      .select('id, project_id, name, kind, description')
+      .eq('id', channelId)
+      .single(),
+    getActiveProjectId(user.id),
+  ])
 
   if (!channel) redirect('/workspace/home')
 
-  // Verify user has access via project membership
-  const { activeProjectId, userMemberId } = await getActiveProjectId(user.id)
+  const { activeProjectId, userMemberId } = projectInfo
   if (!activeProjectId || channel.project_id !== activeProjectId || !userMemberId) {
     redirect('/workspace/home')
   }

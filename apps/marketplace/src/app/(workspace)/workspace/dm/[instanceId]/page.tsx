@@ -20,14 +20,18 @@ export default async function DirectMessagePage({
   const { instanceId } = await params
   const service = createServiceClient()
 
-  const { data: instance } = await service
-    .from('agent_instances')
-    .select('id, status, display_name, agents!inner(name, category, icon_url)')
-    .eq('id', instanceId)
-    .eq('user_id', user.id)
-    .in('status', ['running', 'suspended', 'stopped', 'provisioning', 'error'])
-    .limit(1)
-    .single()
+  // Load agent instance + project membership in parallel
+  const [{ data: instance }, projectInfo] = await Promise.all([
+    service
+      .from('agent_instances')
+      .select('id, status, display_name, agents!inner(name, category, icon_url)')
+      .eq('id', instanceId)
+      .eq('user_id', user.id)
+      .in('status', ['running', 'suspended', 'stopped', 'provisioning', 'error'])
+      .limit(1)
+      .single(),
+    getActiveProjectId(user.id),
+  ])
 
   if (!instance) redirect('/workspace/home')
 
@@ -44,7 +48,7 @@ export default async function DirectMessagePage({
   let membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }> = {}
 
   if (!isNotReady) {
-    const { activeProjectId, userMemberId: uid } = await getActiveProjectId(user.id)
+    const { activeProjectId, userMemberId: uid } = projectInfo
     userMemberId = uid
 
     if (activeProjectId && userMemberId) {
@@ -60,44 +64,54 @@ export default async function DirectMessagePage({
 
       if (agentMember) {
         agentMemberId = agentMember.id
-        // Find DM channel between user and agent
-        const { data: agentChannels } = await service
-          .from('channel_members')
-          .select('channel_id')
-          .eq('member_id', agentMember.id)
 
-        if (agentChannels && agentChannels.length > 0) {
-          const { data: dmChannel } = await service
-            .from('channels')
-            .select('id')
-            .eq('project_id', activeProjectId)
-            .eq('kind', 'direct')
-            .eq('archived', false)
-            .in('id', agentChannels.map(c => c.channel_id))
-            .limit(1)
-            .maybeSingle()
+        // Find DM channel where BOTH user and agent are members
+        // Get channels for both members in parallel
+        const [{ data: userChannels }, { data: agentChannels }] = await Promise.all([
+          service.from('channel_members').select('channel_id').eq('member_id', userMemberId),
+          service.from('channel_members').select('channel_id').eq('member_id', agentMember.id),
+        ])
 
-          if (dmChannel) {
-            channelId = dmChannel.id
+        if (userChannels && agentChannels) {
+          // Intersect — only channels where BOTH are members
+          const agentChannelIds = new Set(agentChannels.map(c => c.channel_id))
+          const sharedChannelIds = userChannels
+            .map(c => c.channel_id)
+            .filter(id => agentChannelIds.has(id))
 
-            // Build members map for the hook
-            const { data: userMemberRow } = await service
-              .from('members')
-              .select('id, display_name')
-              .eq('id', userMemberId)
-              .single()
+          if (sharedChannelIds.length > 0) {
+            const { data: dmChannel } = await service
+              .from('channels')
+              .select('id')
+              .eq('project_id', activeProjectId)
+              .eq('kind', 'direct')
+              .eq('archived', false)
+              .in('id', sharedChannelIds)
+              .limit(1)
+              .maybeSingle()
 
-            membersMap = {
-              [userMemberId]: {
-                displayName: userMemberRow?.display_name ?? 'You',
-                type: 'user',
-              },
-              [agentMember.id]: {
-                displayName: agentMember.display_name ?? agentName,
-                type: 'agent',
-                iconUrl: agent.icon_url,
-                category: agent.category,
-              },
+            if (dmChannel) {
+              channelId = dmChannel.id
+
+              // Build members map for the hook
+              const { data: userMemberRow } = await service
+                .from('members')
+                .select('id, display_name')
+                .eq('id', userMemberId)
+                .single()
+
+              membersMap = {
+                [userMemberId]: {
+                  displayName: userMemberRow?.display_name ?? 'You',
+                  type: 'user',
+                },
+                [agentMember.id]: {
+                  displayName: agentMember.display_name ?? agentName,
+                  type: 'agent',
+                  iconUrl: agent.icon_url,
+                  category: agent.category,
+                },
+              }
             }
           }
         }
