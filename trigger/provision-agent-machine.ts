@@ -4,9 +4,9 @@ import { FlyClient } from '@agentbay/fly'
 import { AGENT_ROLES } from './agent-roles'
 import { PERSONAL_AI_ROLE } from './personal-ai-role'
 
-// v2026.3.12-dev: workspace CLI scripts (workspace-msg, workspace-task) confirmed in image.
-// Never use :latest — fly deploy doesn't update it, so it's always stale.
-const BASE_IMAGE = process.env.FLY_AGENT_BASE_IMAGE ?? 'registry.fly.io/agentbay-agent-base:v2026.3.14-dev'
+// Hardcoded — do NOT use env var, Trigger.dev cloud env gets stale.
+// Bump this when you push a new image. Never use :latest (Fly doesn't pull fresh).
+const BASE_IMAGE = 'registry.fly.io/agentbay-agent-base:v2026.3.14-dev'
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? 'personal'
 const FLY_REGION = process.env.FLY_REGION ?? 'ord'
 
