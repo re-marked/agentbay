@@ -76,7 +76,10 @@ async function dispatchTaskToAssignee(
     .eq('id', memberId)
     .single()
 
-  if (!member?.instance_id) return
+  if (!member?.instance_id) {
+    console.log('[task-actions] dispatchTaskToAssignee: member has no instance_id', { memberId })
+    return
+  }
 
   const { data: instance } = await db
     .from('agent_instances')
@@ -84,7 +87,10 @@ async function dispatchTaskToAssignee(
     .eq('id', member.instance_id)
     .single()
 
-  if (!instance || instance.status !== 'running') return
+  if (!instance || instance.status !== 'running') {
+    console.log('[task-actions] dispatchTaskToAssignee: agent not running', { instanceId: member.instance_id, status: instance?.status })
+    return
+  }
 
   // Trigger the background dispatch task
   await tasks.trigger('dispatch-task-to-agent', {
@@ -142,19 +148,28 @@ export async function createTask(data: {
     : `📋 New task: **${data.title}**${data.priority && data.priority !== 'normal' ? ` [${data.priority}]` : ''} (unassigned)`
 
   const result = await announceTask(db, activeProjectId, task.id, userMemberId, announcement)
+  console.log('[task-actions] announceTask result:', result ? { channelId: result.channelId, threadRootId: result.threadRootId } : null)
 
   // 3. Dispatch to assigned agent via Trigger.dev
   if (data.assignedTo && result) {
-    await dispatchTaskToAssignee(
-      db,
-      data.assignedTo,
-      task.id,
-      data.title,
-      data.description ?? null,
-      data.priority ?? 'normal',
-      result.channelId,
-      result.threadRootId,
-    )
+    console.log('[task-actions] dispatching to agent:', data.assignedTo)
+    try {
+      await dispatchTaskToAssignee(
+        db,
+        data.assignedTo,
+        task.id,
+        data.title,
+        data.description ?? null,
+        data.priority ?? 'normal',
+        result.channelId,
+        result.threadRootId,
+      )
+      console.log('[task-actions] dispatch triggered successfully')
+    } catch (err) {
+      console.error('[task-actions] dispatch failed:', err)
+    }
+  } else {
+    console.log('[task-actions] skipping dispatch:', { assignedTo: data.assignedTo, hasResult: !!result })
   }
 
   revalidatePath('/workspace/tasks')
