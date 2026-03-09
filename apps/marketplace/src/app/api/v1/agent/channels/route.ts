@@ -62,6 +62,29 @@ export async function POST(req: NextRequest) {
 
   const db = createServiceClient()
 
+  // For broadcast/team channels, check if one with the same name already exists
+  if (kind === 'broadcast' || kind === 'team') {
+    const { data: existing } = await db
+      .from('channels')
+      .select('id, name, kind, description')
+      .eq('project_id', auth.projectId)
+      .eq('name', name)
+      .eq('kind', kind)
+      .eq('archived', false)
+      .maybeSingle()
+
+    if (existing) {
+      // Ensure agent is a member, then return existing channel
+      await db
+        .from('channel_members')
+        .upsert(
+          { channel_id: existing.id, member_id: auth.memberId, role: 'participant' },
+          { onConflict: 'channel_id,member_id', ignoreDuplicates: true }
+        )
+      return NextResponse.json(existing, { status: 200 })
+    }
+  }
+
   // For direct channels, enforce exactly 1 other member and check for existing DM
   if (kind === 'direct') {
     if (members.length !== 1) {

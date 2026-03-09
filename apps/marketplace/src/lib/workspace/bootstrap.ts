@@ -81,6 +81,8 @@ export async function ensureWorkspaceBootstrapped(
     if (existing) {
       channelId = existing.id
     } else {
+      // Use upsert-like pattern: insert only if not exists (race-safe)
+      // First try insert, if unique violation or race, re-fetch
       const { data: newChannel, error } = await service
         .from('channels')
         .insert({
@@ -92,14 +94,17 @@ export async function ensureWorkspaceBootstrapped(
         .select('id')
         .single()
 
-      // Race: another request created it
-      if (!newChannel) {
+      if (!newChannel || error) {
+        // Race: another request created it — fetch the winner
         const { data: fallback } = await service
           .from('channels')
           .select('id')
           .eq('project_id', projectId)
           .eq('name', ch.name)
           .eq('kind', 'broadcast')
+          .eq('archived', false)
+          .order('created_at', { ascending: true })
+          .limit(1)
           .single()
         if (fallback) {
           channelId = fallback.id
@@ -108,6 +113,15 @@ export async function ensureWorkspaceBootstrapped(
         }
       } else {
         channelId = newChannel.id
+
+        // Clean up any duplicates that slipped through (race condition)
+        await service
+          .from('channels')
+          .delete()
+          .eq('project_id', projectId)
+          .eq('name', ch.name)
+          .eq('kind', 'broadcast')
+          .neq('id', channelId)
       }
     }
 
