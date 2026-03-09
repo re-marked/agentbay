@@ -5,7 +5,7 @@ export interface FlyMachineConfig {
   env?: Record<string, string>
   services?: FlyService[]
   mounts?: FlyMount[]
-  restart?: { policy: 'no' | 'always' | 'on-failure' }
+  restart?: { policy: 'no' | 'always' | 'on-failure'; max_retries?: number }
   auto_destroy?: boolean
   guest?: {
     cpu_kind: 'shared' | 'performance'

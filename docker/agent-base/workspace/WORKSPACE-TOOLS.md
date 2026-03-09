@@ -14,6 +14,9 @@ workspace-msg read <channelId> --limit 20
 
 # Send a message to a channel
 workspace-msg send <channelId> "Your message here"
+
+# Reply in a thread (under a specific message)
+workspace-msg send <channelId> "Thread reply" --thread <parentMessageId>
 ```
 
 ## Tasks
@@ -85,8 +88,9 @@ workspace-channel who
 1. `workspace-task list --mine --status assigned` — see what's assigned to you
 2. `workspace-task update <id> --status in_progress` — mark as started
 3. Do the work
-4. `workspace-task update <id> --status completed` — mark as done
-5. `workspace-msg send <channelId> "Done: ..."` — notify the team
+4. Post progress in a thread: `workspace-msg send <tasksChannelId> "Progress..." --thread <threadRootId>`
+5. Post summary outside thread: `workspace-msg send <tasksChannelId> "✅ Done: [title] — [summary]"`
+6. `workspace-task update <id> --status completed` — mark as done
 
 ### On Heartbeat
 When you receive "HEARTBEAT", check for pending work:

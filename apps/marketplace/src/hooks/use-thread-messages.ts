@@ -2,49 +2,39 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient as createBrowserClient } from '@agentbay/db/client'
+import type { ChannelMessage } from './use-channel-messages'
 
-export interface ChannelMessage {
-  id: string
+interface UseThreadMessagesOptions {
   channelId: string
-  senderId: string
-  content: string
-  messageKind: string
-  createdAt: string
-  senderName?: string
-  senderType?: 'user' | 'agent'
-  metadata?: Record<string, unknown> | null
-}
-
-interface UseChannelMessagesOptions {
-  channelId: string
-  userMemberId: string
-  /** Pre-loaded member info: id → { displayName, type } */
+  threadRootId: string
+  userMemberId?: string
   members: Record<string, { displayName: string; type: string }>
 }
 
-export function useChannelMessages({
+export function useThreadMessages({
   channelId,
-  userMemberId,
+  threadRootId,
   members,
-}: UseChannelMessagesOptions) {
+}: UseThreadMessagesOptions) {
   const [messages, setMessages] = useState<ChannelMessage[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const supabaseRef = useRef(createBrowserClient())
   const loadRef = useRef<(() => void) | undefined>(undefined)
 
-  // Load history on mount
+  // Load thread root + all replies
   useEffect(() => {
     const load = async () => {
       const supabase = supabaseRef.current
+
+      // Fetch: root message + all replies in this thread
       const { data, error: fetchErr } = await supabase
         .from('channel_messages')
-        .select('id, channel_id, sender_id, content, message_kind, metadata, created_at')
-        .eq('channel_id', channelId)
+        .select('id, channel_id, sender_id, content, message_kind, metadata, created_at, thread_id')
+        .or(`id.eq.${threadRootId},thread_id.eq.${threadRootId}`)
         .is('deleted_at', null)
         .order('created_at', { ascending: true })
-        .limit(100)
+        .limit(200)
 
       if (fetchErr) {
         setError(fetchErr.message)
@@ -52,7 +42,6 @@ export function useChannelMessages({
         return
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setMessages(
         (data ?? []).map((row: any) => ({
           id: row.id,
@@ -71,7 +60,7 @@ export function useChannelMessages({
 
     loadRef.current = load
     load()
-  }, [channelId, members])
+  }, [channelId, threadRootId, members])
 
   // Refetch when tab becomes visible (catches missed Realtime events during sleep/backgrounding)
   useEffect(() => {
@@ -82,12 +71,12 @@ export function useChannelMessages({
     return () => document.removeEventListener('visibilitychange', handler)
   }, [])
 
-  // Subscribe to Realtime INSERTs
+  // Subscribe to Realtime INSERTs on the channel, filter client-side for this thread
   useEffect(() => {
     const supabase = supabaseRef.current
 
     const subscription = supabase
-      .channel(`channel-messages:${channelId}`)
+      .channel(`thread-messages:${threadRootId}`)
       .on(
         'postgres_changes',
         {
@@ -98,6 +87,9 @@ export function useChannelMessages({
         },
         (payload: { new: Record<string, unknown> }) => {
           const row = payload.new
+          // Only include messages that belong to this thread
+          if (row.thread_id !== threadRootId && row.id !== threadRootId) return
+
           const senderId = row.sender_id as string
           const newMsg: ChannelMessage = {
             id: row.id as string,
@@ -111,7 +103,6 @@ export function useChannelMessages({
             metadata: (row.metadata as Record<string, unknown>) ?? null,
           }
 
-          // Add message if not already present (dedup with optimistic updates)
           setMessages(prev => {
             if (prev.some(m => m.id === newMsg.id)) return prev
             // Remove optimistic message if real one arrived
@@ -127,57 +118,11 @@ export function useChannelMessages({
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [channelId, members])
+  }, [channelId, threadRootId, members])
 
-  // Send message
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim()) return
-      setIsSending(true)
-      setError(null)
-
-      // Optimistic update — add user message immediately
-      const optimisticId = `optimistic-${Date.now()}`
-      const optimisticMsg: ChannelMessage = {
-        id: optimisticId,
-        channelId,
-        senderId: userMemberId,
-        content: content.trim(),
-        messageKind: 'text',
-        createdAt: new Date().toISOString(),
-        senderName: members[userMemberId]?.displayName ?? 'You',
-        senderType: 'user',
-      }
-      setMessages(prev => [...prev, optimisticMsg])
-
-      try {
-        const res = await fetch('/api/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channelId, content: content.trim() }),
-        })
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}))
-          throw new Error(data.error ?? `HTTP ${res.status}`)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to send message')
-        // Remove optimistic message on error
-        setMessages(prev => prev.filter(m => m.id !== optimisticId))
-      } finally {
-        setIsSending(false)
-      }
-    },
-    [channelId, userMemberId, members]
-  )
-
-  // Add a message optimistically (for streaming mode where the API route persists it)
-  // Skips if a real (non-optimistic) message with same content+sender already exists
   const addOptimisticMessage = useCallback(
     (msg: ChannelMessage) => {
       setMessages(prev => {
-        // Don't add if a real message already covers this
         const isDuplicate = prev.some(
           m => !m.id.startsWith('optimistic-')
             && m.senderId === msg.senderId
@@ -191,5 +136,5 @@ export function useChannelMessages({
     [],
   )
 
-  return { messages, isLoading, isSending, error, sendMessage, addOptimisticMessage }
+  return { messages, isLoading, error, addOptimisticMessage }
 }

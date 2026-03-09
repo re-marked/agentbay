@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await req.json()
-  const { channelId, content, messageKind = 'text' } = body
+  const { channelId, content, messageKind = 'text', parentId } = body
 
   if (!channelId || !content) {
     return NextResponse.json({ error: 'channelId and content are required' }, { status: 400 })
@@ -39,7 +39,9 @@ export async function POST(req: NextRequest) {
       sender_id: auth.memberId,
       content,
       message_kind: messageKind,
-      depth: 0,
+      depth: parentId ? 1 : 0,
+      parent_id: parentId ?? null,
+      origin_id: parentId ?? null,
     })
     .select('id, created_at')
     .single()

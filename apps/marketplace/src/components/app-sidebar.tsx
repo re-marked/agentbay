@@ -48,12 +48,19 @@ interface ChatInfo {
   agentCount: number
 }
 
+interface BroadcastChannelInfo {
+  id: string
+  name: string
+  description: string | null
+}
+
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   userEmail?: string
   corporationName?: string
   coFounder?: AgentInfo | null
   agents?: AgentInfo[]
   chats?: ChatInfo[]
+  broadcastChannels?: BroadcastChannelInfo[]
   projects?: ProjectInfo[]
   activeProjectId?: string | null
 }
@@ -81,6 +88,7 @@ export function AppSidebar({
   coFounder = null,
   agents = [],
   chats = [],
+  broadcastChannels = [],
   projects = [],
   activeProjectId = null,
   ...props
@@ -340,9 +348,34 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Channels */}
+        {/* Workspace Channels (broadcast) */}
+        {broadcastChannels.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Channels</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {broadcastChannels.map((ch) => {
+                  const chPath = `/workspace/c/${ch.id}`
+                  const isActive = pathname.startsWith(chPath)
+                  return (
+                    <SidebarMenuItem key={ch.id}>
+                      <SidebarMenuButton asChild isActive={isActive} className="gap-2.5">
+                        <Link href={chPath}>
+                          <Hash className="size-4" />
+                          <span className="truncate">{ch.name}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {/* Legacy Channels */}
         <SidebarGroup>
-          <SidebarGroupLabel>Channels</SidebarGroupLabel>
+          <SidebarGroupLabel>{broadcastChannels.length > 0 ? 'Legacy Channels' : 'Channels'}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {chats.map((chat) => {

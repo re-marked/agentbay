@@ -165,6 +165,8 @@ export function DiscordChatPanel({ agentInstanceId, agentName = 'Agent', agentCa
       let currentToolMsgId = ''
       // Whether any content was rendered this turn (for done fallback)
       let turnHadOutput = false
+      // Persist across turns — so multi-turn responses update ONE message
+      let responseMsgId = ''
 
       while (!streamDone) {
         const { done, value } = await reader.read()
@@ -189,22 +191,38 @@ export function DiscordChatPanel({ agentInstanceId, agentName = 'Agent', agentCa
               if (currentEvent === 'delta' && data.content !== undefined) {
                 contentBuffer += data.content
                 if (!streamingMsgId) {
-                  // First delta — create a new streaming message
-                  streamingMsgId = `master-${Date.now()}-${turnCount}-stream-${Math.random().toString(36).slice(2, 6)}`
-                  turnHadOutput = true
-                  const id = streamingMsgId
-                  const snapshot = contentBuffer
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id,
-                      role: 'master',
-                      content: snapshot,
-                      timestamp: new Date(),
-                    },
-                  ])
+                  if (!responseMsgId) {
+                    // First delta of the entire response — create message
+                    responseMsgId = `master-${Date.now()}-${turnCount}-stream-${Math.random().toString(36).slice(2, 6)}`
+                    streamingMsgId = responseMsgId
+                    turnHadOutput = true
+                    const id = streamingMsgId
+                    const snapshot = contentBuffer
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id,
+                        role: 'master',
+                        content: snapshot,
+                        timestamp: new Date(),
+                      },
+                    ])
+                  } else {
+                    // Subsequent turn — reuse the same message (OpenClaw sends accumulated text)
+                    streamingMsgId = responseMsgId
+                    turnHadOutput = true
+                    const id = responseMsgId
+                    const snapshot = contentBuffer
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === id
+                          ? { ...m, content: snapshot }
+                          : m,
+                      ),
+                    )
+                  }
                 } else {
-                  // Subsequent delta — update the streaming message with appended content
+                  // Subsequent delta within same turn — update
                   const id = streamingMsgId
                   const snapshot = contentBuffer
                   setMessages((prev) =>
@@ -351,15 +369,28 @@ export function DiscordChatPanel({ agentInstanceId, agentName = 'Agent', agentCa
                   )
                 } else if (!turnHadOutput && data.content) {
                   // Fallback: no deltas/tools rendered — gateway sent content only in done
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `master-${Date.now()}-${turnCount}`,
-                      role: 'master',
-                      content: data.content,
-                      timestamp: new Date(),
-                    },
-                  ])
+                  if (responseMsgId) {
+                    // Update existing response message
+                    const id = responseMsgId
+                    const content = data.content
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === id ? { ...m, content } : m,
+                      ),
+                    )
+                  } else {
+                    responseMsgId = `master-${Date.now()}-${turnCount}`
+                    const id = responseMsgId
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id,
+                        role: 'master',
+                        content: data.content,
+                        timestamp: new Date(),
+                      },
+                    ])
+                  }
                 }
                 contentBuffer = ''
                 streamingMsgId = ''
@@ -464,16 +495,26 @@ export function DiscordChatPanel({ agentInstanceId, agentName = 'Agent', agentCa
           ),
         )
       } else if (contentBuffer) {
-        // Content buffer has data but no streaming message — create one
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `master-${Date.now()}-final`,
-            role: 'master',
-            content: contentBuffer,
-            timestamp: new Date(),
-          },
-        ])
+        // Content buffer has data but no streaming message — update or create
+        if (responseMsgId) {
+          const id = responseMsgId
+          const finalContent = contentBuffer
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id ? { ...m, content: finalContent } : m,
+            ),
+          )
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `master-${Date.now()}-final`,
+              role: 'master',
+              content: contentBuffer,
+              timestamp: new Date(),
+            },
+          ])
+        }
       }
 
       if (timeoutId) {

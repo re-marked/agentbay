@@ -51,6 +51,8 @@ export function streamFromAgent(
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       let ws: WebSocket | null = null
+      let finalContent = ''
+      let completeCalled = false
 
       const cleanup = () => {
         if (ws && ws.readyState === ws.OPEN) {
@@ -84,14 +86,12 @@ export function streamFromAgent(
 
         sendChatMessage(ws, resolvedSessionKey, lastMessage.content)
 
-        // Listen for the agent's turn and stream events
-        let finalContent = ''
-
         for await (const event of listenForAgentTurn(ws)) {
           if (signal?.aborted) break
 
           switch (event.type) {
             case 'delta':
+              finalContent += (event.data.content as string) ?? ''
               controller.enqueue(formatSSE('delta', { content: event.data.content }))
               break
 
@@ -124,7 +124,7 @@ export function streamFromAgent(
             }
 
             case 'done':
-              finalContent = (event.data.content as string) ?? ''
+              finalContent = (event.data.content as string) ?? finalContent
               controller.enqueue(formatSSE('done', { content: finalContent }))
               break
 
@@ -135,6 +135,7 @@ export function streamFromAgent(
         }
 
         // Persist the final text response
+        completeCalled = true
         try {
           await callbacks.onComplete({ content: finalContent })
         } catch (err) {
@@ -149,6 +150,14 @@ export function streamFromAgent(
           // Controller may already be closed
         }
       } finally {
+        // Always persist accumulated content — even on abort/error/disconnect
+        if (!completeCalled && finalContent) {
+          try {
+            await callbacks.onComplete({ content: finalContent })
+          } catch (err) {
+            console.error('[stream-dispatch] onComplete (finally) failed:', err)
+          }
+        }
         cleanup()
         try {
           controller.close()

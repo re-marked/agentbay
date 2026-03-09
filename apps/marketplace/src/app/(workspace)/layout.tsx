@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/sidebar'
 import { getActiveProjectId, getProjectAgents, toAgentInfoList } from '@/lib/projects/queries'
 import { getProjectChats } from '@/lib/chats/queries'
+import { createServiceClient } from '@agentbay/db/server'
 
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser()
@@ -15,10 +16,11 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
   const { corporations, projects, activeProjectId, coFounderInstanceId } =
     await getActiveProjectId(user.id)
 
-  // Run both queries in parallel — each is now a single DB round-trip
-  const [instances, chats] = await Promise.all([
+  // Run queries in parallel
+  const [instances, chats, broadcastChannels] = await Promise.all([
     getProjectAgents(user.id, activeProjectId),
     getProjectChats(user.id, activeProjectId),
+    activeProjectId ? loadBroadcastChannels(activeProjectId) : [],
   ])
   const allAgents = toAgentInfoList(instances)
 
@@ -38,6 +40,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
         coFounder={coFounder}
         agents={agents}
         chats={chats}
+        broadcastChannels={broadcastChannels}
         projects={projects}
         activeProjectId={activeProjectId}
       />
@@ -46,4 +49,21 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
       </SidebarInset>
     </SidebarProvider>
   )
+}
+
+async function loadBroadcastChannels(projectId: string) {
+  const db = createServiceClient()
+  const { data } = await db
+    .from('channels')
+    .select('id, name, description')
+    .eq('project_id', projectId)
+    .eq('kind', 'broadcast')
+    .eq('archived', false)
+    .order('name', { ascending: true })
+
+  return (data ?? []).map(c => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+  }))
 }
