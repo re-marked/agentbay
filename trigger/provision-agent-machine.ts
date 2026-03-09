@@ -56,6 +56,19 @@ async function allocatePublicIPs(appName: string): Promise<void> {
   }
 }
 
+/** Deep-merge two config objects (b overrides a) */
+function deepMerge(a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...a }
+  for (const key in b) {
+    if (b[key] && typeof b[key] === 'object' && !Array.isArray(b[key]) && a[key] && typeof a[key] === 'object') {
+      result[key] = deepMerge(a[key] as Record<string, unknown>, b[key] as Record<string, unknown>)
+    } else {
+      result[key] = b[key]
+    }
+  }
+  return result
+}
+
 export const provisionAgentMachine = task({
   id: 'provision-agent-machine',
   maxDuration: 300,
@@ -196,11 +209,9 @@ export const provisionAgentMachine = task({
         roleEnv.AGENT_WHOAMI_MD = PERSONAL_AI_ROLE.whoami
         roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
         roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
-        roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(PERSONAL_AI_ROLE.openclawOverrides)
       } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
-        roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(role.openclawOverrides)
       }
 
       // Workspace context — all agents get Router API access + identity
@@ -219,6 +230,13 @@ export const provisionAgentMachine = task({
         agents: { defaults: { model: { primary: resolvedModel }, sandbox: { mode: 'off' } } },
       }
 
+      // Merge role overrides (e.g. sandbox:off) with model overrides (user's preferred model).
+      // Model overrides take precedence — prevents roles from hardcoding stale models.
+      const roleOcOverrides = (isCoFounder
+        ? PERSONAL_AI_ROLE.openclawOverrides
+        : role?.openclawOverrides ?? {}) as Record<string, unknown>
+      const finalOverrides = deepMerge(roleOcOverrides, modelOverrides as unknown as Record<string, unknown>)
+
       const machine = await fly.createMachine(appName, {
         region: FLY_REGION,
         config: {
@@ -228,7 +246,7 @@ export const provisionAgentMachine = task({
             OPENCLAW_GATEWAY_TOKEN: gatewayToken,
             NODE_OPTIONS: '--max-old-space-size=1536',
             NODE_ENV: 'production',
-            AGENT_OPENCLAW_OVERRIDES: JSON.stringify(modelOverrides),
+            AGENT_OPENCLAW_OVERRIDES: JSON.stringify(finalOverrides),
             ...keyEnv,
             ...roleEnv,
           },
@@ -243,12 +261,12 @@ export const provisionAgentMachine = task({
               ],
               autostop: 'off',
               autostart: true,
-              min_machines_running: 0,
+              min_machines_running: 1,
               checks: [
                 {
                   type: 'http',
                   port: 18789,
-                  path: '/health',
+                  path: '/healthz',
                   method: 'GET',
                   interval: '30s',
                   timeout: '5s',
@@ -262,7 +280,7 @@ export const provisionAgentMachine = task({
             cpus: 2,
             memory_mb: Math.max(agent.fly_machine_memory_mb ?? 2048, 2048),
           },
-          restart: { policy: 'on-failure' },
+          restart: { policy: 'always', max_retries: 5 },
         },
       })
 
@@ -275,7 +293,7 @@ export const provisionAgentMachine = task({
       // ── 6b. Wait for health check to pass ──────────────────────────────
       // OpenClaw takes ~50s to initialize. Don't mark as running until
       // the /health endpoint responds 200 so users can't chat too early.
-      const healthUrl = `https://${appName}.fly.dev/health`
+      const healthUrl = `https://${appName}.fly.dev/healthz`
       const healthTimeout = 120_000 // 2 minutes max
       const healthInterval = 5_000  // poll every 5s
       const healthStart = Date.now()

@@ -32,6 +32,7 @@ export function useChannelMessages({
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const supabaseRef = useRef(createBrowserClient())
+  const loadRef = useRef<(() => void) | undefined>(undefined)
 
   // Load history on mount
   useEffect(() => {
@@ -68,8 +69,18 @@ export function useChannelMessages({
       setIsLoading(false)
     }
 
+    loadRef.current = load
     load()
   }, [channelId, members])
+
+  // Refetch when tab becomes visible (catches missed Realtime events during sleep/backgrounding)
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === 'visible') loadRef.current?.()
+    }
+    document.addEventListener('visibilitychange', handler)
+    return () => document.removeEventListener('visibilitychange', handler)
+  }, [])
 
   // Subscribe to Realtime INSERTs
   useEffect(() => {

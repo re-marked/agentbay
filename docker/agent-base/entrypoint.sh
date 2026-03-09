@@ -115,6 +115,43 @@ if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
   "
 fi
 
+# ── 1e. Configure model fallbacks from all available providers ──
+# OpenClaw tries fallbacks[] in order when the primary model fails.
+# Rebuilt on every boot so new keys/providers take effect immediately.
+if [ -f /data/openclaw.json ]; then
+  node <<'FALLBACK_EOF'
+const fs = require('fs');
+const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));
+const primary = cfg.agents?.defaults?.model?.primary ?? '';
+const fallbacks = [];
+
+if (process.env.ROUTEWAY_API_KEY) {
+  if (primary !== 'routeway/gpt-5-mini') fallbacks.push('routeway/gpt-5-mini');
+  if (primary !== 'routeway/minimax-m2.5') fallbacks.push('routeway/minimax-m2.5');
+}
+if (process.env.GEMINI_API_KEY) {
+  if (primary !== 'google/gemini-2.5-flash') fallbacks.push('google/gemini-2.5-flash');
+}
+if (process.env.OPENAI_API_KEY) {
+  if (primary !== 'openai/gpt-4.1-mini') fallbacks.push('openai/gpt-4.1-mini');
+}
+if (process.env.ANTHROPIC_API_KEY) {
+  if (primary !== 'anthropic/claude-sonnet-4-5') fallbacks.push('anthropic/claude-sonnet-4-5');
+}
+
+if (fallbacks.length > 0) {
+  cfg.agents = cfg.agents || {};
+  cfg.agents.defaults = cfg.agents.defaults || {};
+  cfg.agents.defaults.model = cfg.agents.defaults.model || {};
+  cfg.agents.defaults.model.fallbacks = fallbacks;
+  fs.writeFileSync('/data/openclaw.json', JSON.stringify(cfg, null, 2));
+  console.log('[entrypoint] Model fallbacks:', fallbacks.join(', '));
+} else {
+  console.log('[entrypoint] No additional providers for fallbacks');
+}
+FALLBACK_EOF
+fi
+
 # ── 2. Seed workspace files — full copy on first boot, missing-files-only on subsequent boots
 if [ -z "$(ls -A /data/workspace 2>/dev/null)" ]; then
   cp -r /opt/openclaw-defaults/workspace/. /data/workspace/ 2>/dev/null || true
@@ -205,5 +242,27 @@ node -e "\
 
 # Mark first boot complete
 touch /data/.initialized
+
+# ── 6. Validate configuration — fail fast if agent can't work ──
+if [ ! -f "$AUTH_FILE" ]; then
+  echo "[FATAL] auth-profiles.json not created — no API keys available"
+  exit 1
+fi
+
+PROFILE_COUNT=$(node -e "const p=JSON.parse(require('fs').readFileSync('$AUTH_FILE')).profiles;console.log(Object.keys(p).length)")
+if [ "$PROFILE_COUNT" = "0" ]; then
+  echo "[FATAL] auth-profiles.json has zero profiles — agent cannot process requests"
+  exit 1
+fi
+echo "[entrypoint] Validated: $PROFILE_COUNT auth profile(s)"
+
+# ── 7. Clear stale sessions on every boot ──
+# Sessions cache model/provider config. After model changes or key rotation,
+# stale sessions cause phantom errors. Workspace tools provide all persistent
+# context — session history is expendable.
+if [ -d /data/agents/main/sessions ]; then
+  rm -f /data/agents/main/sessions/sessions.json 2>/dev/null
+  echo "[entrypoint] Cleared stale sessions"
+fi
 
 exec "$@"

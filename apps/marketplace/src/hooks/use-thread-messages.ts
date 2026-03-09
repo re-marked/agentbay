@@ -20,6 +20,7 @@ export function useThreadMessages({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const supabaseRef = useRef(createBrowserClient())
+  const loadRef = useRef<(() => void) | undefined>(undefined)
 
   // Load thread root + all replies
   useEffect(() => {
@@ -57,8 +58,18 @@ export function useThreadMessages({
       setIsLoading(false)
     }
 
+    loadRef.current = load
     load()
   }, [channelId, threadRootId, members])
+
+  // Refetch when tab becomes visible (catches missed Realtime events during sleep/backgrounding)
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === 'visible') loadRef.current?.()
+    }
+    document.addEventListener('visibilitychange', handler)
+    return () => document.removeEventListener('visibilitychange', handler)
+  }, [])
 
   // Subscribe to Realtime INSERTs on the channel, filter client-side for this thread
   useEffect(() => {

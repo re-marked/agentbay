@@ -1,4 +1,4 @@
-import { task, logger } from '@trigger.dev/sdk/v3'
+import { task, tasks as triggerTasks, logger } from '@trigger.dev/sdk/v3'
 import { createServiceClient } from '@agentbay/db'
 
 export interface DispatchTaskPayload {
@@ -28,7 +28,7 @@ export const dispatchTaskToAgent = task({
     // 1. Get agent connection info
     const { data: instance } = await db
       .from('agent_instances')
-      .select('fly_app_name, gateway_token, status')
+      .select('fly_app_name, gateway_token, status, user_id, agent_id, display_name')
       .eq('id', instanceId)
       .single()
 
@@ -38,7 +38,48 @@ export const dispatchTaskToAgent = task({
     }
 
     if (instance.status !== 'running' || !instance.fly_app_name || !instance.gateway_token) {
-      logger.warn('Agent not running, skipping dispatch', { instanceId, status: instance.status })
+      // Self-healing: trigger re-provision for dead/errored agents
+      if (['destroyed', 'error', 'stopped'].includes(instance.status)) {
+        logger.warn('Agent down — triggering auto-reprovision', { instanceId, status: instance.status })
+
+        const { data: member } = await db
+          .from('members')
+          .select('id, project_id')
+          .eq('instance_id', instanceId)
+          .neq('status', 'archived')
+          .limit(1)
+          .maybeSingle()
+
+        await db.from('agent_instances')
+          .update({ status: 'provisioning' })
+          .eq('id', instanceId)
+
+        try {
+          await triggerTasks.trigger('provision-agent-machine', {
+            userId: instance.user_id,
+            agentId: instance.agent_id,
+            instanceId,
+            projectId: member?.project_id ?? undefined,
+            memberId: member?.id ?? undefined,
+            isCoFounder: instance.display_name === 'Personal AI',
+          })
+        } catch (err) {
+          logger.error('Auto-reprovision trigger failed', { error: String(err) })
+        }
+
+        // Notify in the task thread
+        await db.from('channel_messages').insert({
+          channel_id: channelId,
+          sender_id: agentMemberId,
+          content: 'Agent is restarting — will resume this task when back online.',
+          message_kind: 'system',
+          thread_id: threadRootId,
+          depth: 1,
+        })
+      } else {
+        logger.warn('Agent not ready for dispatch', { instanceId, status: instance.status })
+      }
+
       return { ok: false, error: `Agent is ${instance.status}` }
     }
 
