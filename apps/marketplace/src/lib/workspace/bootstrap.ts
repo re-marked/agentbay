@@ -62,57 +62,63 @@ export async function ensureWorkspaceBootstrapped(
     }
   }
 
-  // 2. Create or find #general channel
-  let generalChannelId: string
+  // 2. Create or find broadcast channels (#general, #tasks)
+  const broadcastChannels = [
+    { name: 'general', description: 'Project-wide announcements' },
+    { name: 'tasks', description: 'Task assignments and progress updates' },
+  ]
 
-  const { data: existingGeneral } = await service
-    .from('channels')
-    .select('id')
-    .eq('project_id', projectId)
-    .eq('name', 'general')
-    .eq('kind', 'broadcast')
-    .maybeSingle()
-
-  if (existingGeneral) {
-    generalChannelId = existingGeneral.id
-  } else {
-    const { data: newChannel, error } = await service
+  for (const ch of broadcastChannels) {
+    const { data: existing } = await service
       .from('channels')
-      .insert({
-        project_id: projectId,
-        name: 'general',
-        kind: 'broadcast',
-        description: 'Project-wide announcements',
-      })
       .select('id')
-      .single()
+      .eq('project_id', projectId)
+      .eq('name', ch.name)
+      .eq('kind', 'broadcast')
+      .maybeSingle()
 
-    // Race: another request created it
-    if (!newChannel) {
-      const { data: fallback } = await service
-        .from('channels')
-        .select('id')
-        .eq('project_id', projectId)
-        .eq('name', 'general')
-        .eq('kind', 'broadcast')
-        .single()
-      if (fallback) {
-        generalChannelId = fallback.id
-      } else {
-        throw new Error(`Failed to create #general channel: ${error?.message}`)
-      }
+    let channelId: string
+    if (existing) {
+      channelId = existing.id
     } else {
-      generalChannelId = newChannel.id
-    }
-  }
+      const { data: newChannel, error } = await service
+        .from('channels')
+        .insert({
+          project_id: projectId,
+          name: ch.name,
+          kind: 'broadcast',
+          description: ch.description,
+        })
+        .select('id')
+        .single()
 
-  // 3. Add user to #general (idempotent via unique constraint)
-  await service
-    .from('channel_members')
-    .upsert(
-      { channel_id: generalChannelId, member_id: userMemberId, role: 'owner' },
-      { onConflict: 'channel_id,member_id', ignoreDuplicates: true }
-    )
+      // Race: another request created it
+      if (!newChannel) {
+        const { data: fallback } = await service
+          .from('channels')
+          .select('id')
+          .eq('project_id', projectId)
+          .eq('name', ch.name)
+          .eq('kind', 'broadcast')
+          .single()
+        if (fallback) {
+          channelId = fallback.id
+        } else {
+          throw new Error(`Failed to create #${ch.name} channel: ${error?.message}`)
+        }
+      } else {
+        channelId = newChannel.id
+      }
+    }
+
+    // 3. Add user to channel (idempotent via unique constraint)
+    await service
+      .from('channel_members')
+      .upsert(
+        { channel_id: channelId, member_id: userMemberId, role: 'owner' },
+        { onConflict: 'channel_id,member_id', ignoreDuplicates: true }
+      )
+  }
 
   // 4. Backfill: agent_instances without corresponding members
   const { data: instances } = await service

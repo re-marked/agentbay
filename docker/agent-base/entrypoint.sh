@@ -69,9 +69,9 @@ if [ -f /data/openclaw.json ] && grep -q '"gemini-2.0-flash"' /data/openclaw.jso
 fi
 
 # ── 1d. Always ensure Routeway provider is registered (on every boot so existing volumes get it)
-# Also migrates model to routeway/gpt-5-mini when machine has only Routeway key.
+# Also migrates model to routeway/gpt-5 when machine has only Routeway key.
 if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
-  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/gpt-5-mini}"
+  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/gpt-5}"
   node -e "\
     const fs = require('fs');\
     const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));\
@@ -85,18 +85,18 @@ if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
         baseUrl: 'https://api.routeway.ai/v1',\
         apiKey: '\${ROUTEWAY_API_KEY}',\
         api: 'openai-completions',\
-        models: [{ id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
+        models: [{ id: 'gpt-5', name: 'GPT-5' }, { id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
       };\
       changed = true;\
       console.log('[entrypoint] Registered routeway provider in openclaw.json');\
     } else {\
       const rw = cfg.models.providers.routeway;\
       const ids = (rw.models || []).map(m => m.id);\
-      if (!ids.includes('gpt-5-mini')) {\
+      if (!ids.includes('gpt-5')) {\
         rw.models = rw.models || [];\
-        rw.models.unshift({ id: 'gpt-5-mini', name: 'GPT-5 Mini' });\
+        rw.models.unshift({ id: 'gpt-5', name: 'GPT-5' });\
         changed = true;\
-        console.log('[entrypoint] Added gpt-5-mini to existing routeway provider');\
+        console.log('[entrypoint] Added gpt-5 to existing routeway provider');\
       }\
     }\
     \
@@ -203,6 +203,12 @@ Quick reference:
 - workspace-task create "title" --description "..." - create a task
 - workspace-task list - list tasks
 - workspace-task update TASK_ID --status in_progress - update a task
+- workspace-channel create "name" --kind team --members ID1,ID2 - create a channel
+- workspace-channel archive CHANNEL_ID - archive a channel
+- workspace-channel invite CHANNEL_ID MEMBER_ID - add someone to a channel
+- workspace-channel kick CHANNEL_ID MEMBER_ID - remove someone
+- workspace-channel members CHANNEL_ID - list channel members
+- workspace-channel who - list all members in the project
 TOOLS_EOF
     echo "[entrypoint] Injected workspace tools reference into AGENTS.md"
   fi

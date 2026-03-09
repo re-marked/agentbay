@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server'
  * Plus headers: X-Agent-Member-Id, X-Agent-Project-Id
  */
 export async function authenticateAgent(req: NextRequest): Promise<
-  | { ok: true; memberId: string; projectId: string }
+  | { ok: true; memberId: string; projectId: string; rank: string }
   | { ok: false; error: string; status: number }
 > {
   const authHeader = req.headers.get('authorization')
@@ -32,7 +32,7 @@ export async function authenticateAgent(req: NextRequest): Promise<
   const db = createServiceClient()
   const { data: member } = await db
     .from('members')
-    .select('id, status')
+    .select('id, status, rank')
     .eq('id', memberId)
     .eq('project_id', projectId)
     .single()
@@ -45,5 +45,5 @@ export async function authenticateAgent(req: NextRequest): Promise<
     return { ok: false, error: 'Member is archived', status: 403 }
   }
 
-  return { ok: true, memberId, projectId }
+  return { ok: true, memberId, projectId, rank: member.rank }
 }

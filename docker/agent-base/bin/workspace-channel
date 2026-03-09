@@ -1,0 +1,231 @@
+#!/bin/sh
+# workspace-channel — create, update, and manage channels
+# Usage:
+#   workspace-channel create "name" [--kind team|direct|broadcast] [--description "..."] [--members id1,id2,...]
+#   workspace-channel update <channelId> [--name "..."] [--description "..."] [--pinned] [--no-pinned]
+#   workspace-channel archive <channelId>
+#   workspace-channel unarchive <channelId>
+#   workspace-channel invite <channelId> <memberId>
+#   workspace-channel kick <channelId> <memberId>
+#   workspace-channel members <channelId>
+#   workspace-channel who                        # list all members in the project
+#
+# Requires: ROUTER_URL, ROUTER_SERVICE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+
+set -e
+
+# ── Preflight: check required env vars ──
+missing=""
+[ -z "$ROUTER_URL" ] && missing="$missing ROUTER_URL"
+[ -z "$ROUTER_SERVICE_KEY" ] && missing="$missing ROUTER_SERVICE_KEY"
+[ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
+[ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
+if [ -n "$missing" ]; then
+  echo "Error: Missing required env vars:$missing"
+  echo "These are set during provisioning. If missing, the machine was provisioned without workspace context."
+  exit 1
+fi
+
+API="${ROUTER_URL}/v1/agent"
+AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
+MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
+PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
+
+usage() {
+  echo "Usage:"
+  echo "  workspace-channel create \"name\" [--kind team|direct|broadcast] [--description \"...\"] [--members id1,id2]"
+  echo "  workspace-channel update <channelId> [--name \"...\"] [--description \"...\"] [--pinned] [--no-pinned]"
+  echo "  workspace-channel archive <channelId>"
+  echo "  workspace-channel unarchive <channelId>"
+  echo "  workspace-channel invite <channelId> <memberId>"
+  echo "  workspace-channel kick <channelId> <memberId>"
+  echo "  workspace-channel members <channelId>"
+  echo "  workspace-channel who"
+  exit 1
+}
+
+# Helper: run curl and show errors clearly
+api_call() {
+  METHOD="$1"; shift
+  URL="$1"; shift
+  TMPFILE=$(mktemp)
+  HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
+    -H "$AUTH" -H "$MEMBER" -H "$PROJECT" "$@" 2>&1)
+  if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
+    echo "Error: HTTP $HTTP_CODE from $URL"
+    cat "$TMPFILE" 2>/dev/null
+    rm -f "$TMPFILE"
+    exit 1
+  fi
+  cat "$TMPFILE"
+  rm -f "$TMPFILE"
+}
+
+case "${1:-}" in
+  create)
+    shift
+    NAME=""
+    KIND="team"
+    DESC=""
+    MEMBERS=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --kind)        KIND="$2"; shift 2 ;;
+        --description) DESC="$2"; shift 2 ;;
+        --members)     MEMBERS="$2"; shift 2 ;;
+        *)             NAME="$1"; shift ;;
+      esac
+    done
+    if [ -z "$NAME" ]; then
+      echo "Error: name is required"
+      exit 1
+    fi
+    BODY="{\"name\":\"$(echo "$NAME" | sed 's/"/\\"/g')\",\"kind\":\"$KIND\""
+    if [ -n "$DESC" ]; then
+      BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
+    fi
+    if [ -n "$MEMBERS" ]; then
+      # Convert comma-separated list to JSON array
+      MEMBER_ARRAY=$(echo "$MEMBERS" | sed 's/,/","/g')
+      BODY="$BODY,\"members\":[\"$MEMBER_ARRAY\"]"
+    fi
+    BODY="$BODY}"
+    RESULT=$(api_call POST "${API}/channels" \
+      -H "Content-Type: application/json" \
+      -d "$BODY")
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if(d.error){console.log('Error:',d.error);process.exit(1)}
+      console.log('Created channel: '+d.name+' ('+d.kind+')');
+      console.log('ID: '+d.id);
+    "
+    ;;
+
+  update)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: channelId is required"
+      exit 1
+    fi
+    shift 2
+    BODY="{\"channelId\":\"$CHANNEL_ID\""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name)        BODY="$BODY,\"name\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
+        --description) BODY="$BODY,\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
+        --pinned)      BODY="$BODY,\"pinned\":true"; shift ;;
+        --no-pinned)   BODY="$BODY,\"pinned\":false"; shift ;;
+        *)             shift ;;
+      esac
+    done
+    BODY="$BODY}"
+    RESULT=$(api_call PATCH "${API}/channels" \
+      -H "Content-Type: application/json" \
+      -d "$BODY")
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if(d.error){console.log('Error:',d.error);process.exit(1)}
+      console.log('Updated: '+d.name+(d.pinned?' [pinned]':'')+(d.archived?' [archived]':''));
+    "
+    ;;
+
+  archive)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: channelId is required"
+      exit 1
+    fi
+    RESULT=$(api_call PATCH "${API}/channels" \
+      -H "Content-Type: application/json" \
+      -d "{\"channelId\":\"$CHANNEL_ID\",\"archived\":true}")
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if(d.error){console.log('Error:',d.error);process.exit(1)}
+      console.log('Archived: '+d.name);
+    "
+    ;;
+
+  unarchive)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: channelId is required"
+      exit 1
+    fi
+    RESULT=$(api_call PATCH "${API}/channels" \
+      -H "Content-Type: application/json" \
+      -d "{\"channelId\":\"$CHANNEL_ID\",\"archived\":false}")
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if(d.error){console.log('Error:',d.error);process.exit(1)}
+      console.log('Unarchived: '+d.name);
+    "
+    ;;
+
+  invite)
+    CHANNEL_ID="$2"
+    TARGET_ID="$3"
+    if [ -z "$CHANNEL_ID" ] || [ -z "$TARGET_ID" ]; then
+      echo "Error: workspace-channel invite <channelId> <memberId>"
+      exit 1
+    fi
+    RESULT=$(api_call POST "${API}/channels/members" \
+      -H "Content-Type: application/json" \
+      -d "{\"channelId\":\"$CHANNEL_ID\",\"memberId\":\"$TARGET_ID\"}")
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if(d.error){console.log('Error:',d.error);process.exit(1)}
+      console.log('Invited '+d.memberId+' as '+d.role);
+    "
+    ;;
+
+  kick)
+    CHANNEL_ID="$2"
+    TARGET_ID="$3"
+    if [ -z "$CHANNEL_ID" ] || [ -z "$TARGET_ID" ]; then
+      echo "Error: workspace-channel kick <channelId> <memberId>"
+      exit 1
+    fi
+    RESULT=$(api_call DELETE "${API}/channels/members?channelId=${CHANNEL_ID}&memberId=${TARGET_ID}")
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if(d.error){console.log('Error:',d.error);process.exit(1)}
+      console.log('Removed '+d.removed+' from channel');
+    "
+    ;;
+
+  members)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: workspace-channel members <channelId>"
+      exit 1
+    fi
+    api_call GET "${API}/channels/members?channelId=${CHANNEL_ID}" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(d.error){console.log('Error:',d.error);process.exit(1)}
+        (d.members||[]).forEach(m=>{
+          const tag=m.type==='agent'?'[bot]':'';
+          const role=m.role==='owner'?'(owner)':m.role==='observer'?'(observer)':'';
+          console.log(m.memberId.slice(0,8)+' '+m.displayName+tag+' ['+m.rank+'] '+m.status+' '+role);
+        });
+        if(!(d.members||[]).length) console.log('No members found.');
+      "
+    ;;
+
+  who)
+    api_call GET "${API}/members" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(d.error){console.log('Error:',d.error);process.exit(1)}
+        (d.members||[]).forEach(m=>{
+          const tag=m.type==='agent'?'[bot]':'';
+          console.log(m.id+' '+m.displayName+tag+' ['+m.rank+'] '+m.status);
+        });
+        if(!(d.members||[]).length) console.log('No members found.');
+      "
+    ;;
+
+  *)
+    usage
+    ;;
+esac
