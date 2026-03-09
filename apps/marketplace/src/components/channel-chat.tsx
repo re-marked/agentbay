@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
+import { useThreadMessages } from '@/hooks/use-thread-messages'
 import { useStreamingChat } from '@/hooks/use-streaming-chat'
 import { MarkdownContent } from '@/components/markdown-content'
 import { ToolUseBlockList, type ToolUse } from '@/components/tool-use-block'
@@ -24,6 +25,10 @@ interface ChannelChatProps {
   agentIconUrl?: string | null
   placeholder?: string
   streaming?: boolean
+  /** When set, scopes the chat to a thread under this root message */
+  threadId?: string
+  /** When set, uses task-scoped session for the agent */
+  taskId?: string
 }
 
 function formatTime(date: Date): string {
@@ -83,12 +88,25 @@ export function ChannelChat({
   agentIconUrl,
   placeholder,
   streaming = false,
+  threadId,
+  taskId,
 }: ChannelChatProps) {
-  const { messages, isLoading, isSending, error, sendMessage, addOptimisticMessage } = useChannelMessages({
+  // Use thread-scoped hook when threadId is provided, otherwise full channel
+  const channelHook = useChannelMessages({
     channelId,
     userMemberId,
     members,
   })
+  const threadHook = useThreadMessages({
+    channelId,
+    threadRootId: threadId ?? '',
+    userMemberId,
+    members,
+  })
+
+  const activeHook = threadId ? threadHook : channelHook
+  const { messages, isLoading, error, addOptimisticMessage } = activeHook
+  const { isSending = false, sendMessage = async () => {} } = 'isSending' in activeHook ? activeHook as any : {}
 
   const {
     sendStreamingMessage,
@@ -99,6 +117,8 @@ export function ChannelChat({
     cancelStream,
   } = useStreamingChat({
     channelId,
+    threadId,
+    taskId,
     onDone: useCallback((result: { content: string; tools: ToolUse[] }) => {
       // Bridge the gap: inject optimistic agent messages so content doesn't
       // disappear between streaming-clear and Realtime delivery

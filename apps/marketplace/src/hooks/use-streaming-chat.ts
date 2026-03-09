@@ -10,11 +10,15 @@ interface StreamDoneResult {
 
 interface UseStreamingChatOptions {
   channelId: string
+  /** When set, scopes messages to a thread under this root message */
+  threadId?: string
+  /** When set, uses task-scoped session for the agent */
+  taskId?: string
   /** Called when the agent turn completes — use to inject an optimistic message before Realtime arrives */
   onDone?: (result: StreamDoneResult) => void
 }
 
-export function useStreamingChat({ channelId, onDone }: UseStreamingChatOptions) {
+export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStreamingChatOptions) {
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
   const [streamingContent, setStreamingContent] = useState('')
@@ -41,7 +45,7 @@ export function useStreamingChat({ channelId, onDone }: UseStreamingChatOptions)
         const res = await fetch('/api/v1/messages/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channelId, content: content.trim() }),
+          body: JSON.stringify({ channelId, content: content.trim(), threadId, taskId }),
           signal: abortController.signal,
         })
 
