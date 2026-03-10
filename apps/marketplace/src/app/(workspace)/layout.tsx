@@ -6,7 +6,6 @@ import {
   SidebarProvider,
 } from '@/components/ui/sidebar'
 import { getActiveProjectId, getProjectAgents, toAgentInfoList } from '@/lib/projects/queries'
-import { getProjectChats } from '@/lib/chats/queries'
 import { createServiceClient } from '@agentbay/db/server'
 
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
@@ -17,9 +16,8 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
     await getActiveProjectId(user.id)
 
   // Run queries in parallel
-  const [instances, chats, broadcastChannels] = await Promise.all([
+  const [instances, broadcastChannels] = await Promise.all([
     getProjectAgents(user.id, activeProjectId),
-    getProjectChats(user.id, activeProjectId),
     activeProjectId ? loadBroadcastChannels(activeProjectId) : [],
   ])
   const allAgents = toAgentInfoList(instances)
@@ -39,7 +37,6 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
         corporationName={corporations[0]?.name}
         coFounder={coFounder}
         agents={agents}
-        chats={chats}
         broadcastChannels={broadcastChannels}
         projects={projects}
         activeProjectId={activeProjectId}
