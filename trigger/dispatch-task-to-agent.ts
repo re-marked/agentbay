@@ -73,7 +73,7 @@ export const dispatchTaskToAgent = task({
           sender_id: agentMemberId,
           content: 'Agent is restarting — will resume this task when back online.',
           message_kind: 'system',
-          thread_id: threadRootId,
+          parent_id: threadRootId,
           depth: 1,
         })
       } else {
@@ -89,7 +89,7 @@ export const dispatchTaskToAgent = task({
       sender_id: agentMemberId,
       content: `Working on this task...`,
       message_kind: 'system',
-      thread_id: threadRootId,
+      parent_id: threadRootId,
       depth: 1,
     })
 
@@ -149,7 +149,7 @@ export const dispatchTaskToAgent = task({
           sender_id: agentMemberId,
           content: `Failed to work on task (HTTP ${res.status})`,
           message_kind: 'system',
-          thread_id: threadRootId,
+          parent_id: threadRootId,
           depth: 1,
         })
 
@@ -169,7 +169,7 @@ export const dispatchTaskToAgent = task({
           sender_id: agentMemberId,
           content,
           message_kind: 'text',
-          thread_id: threadRootId,
+          parent_id: threadRootId,
           depth: 1,
         })
       }
@@ -193,7 +193,7 @@ export const dispatchTaskToAgent = task({
         sender_id: agentMemberId,
         content: `Error while working on task: ${message}`,
         message_kind: 'system',
-        thread_id: threadRootId,
+        parent_id: threadRootId,
         depth: 1,
       })
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# workspace-channel — create, update, and manage channels
+# workspace-channel — create, update, and manage channels (direct Supabase)
 # Usage:
 #   workspace-channel create "name" [--kind team|direct|broadcast] [--description "..."] [--members id1,id2,...]
 #   workspace-channel update <channelId> [--name "..."] [--description "..."] [--pinned] [--no-pinned]
@@ -10,26 +10,24 @@
 #   workspace-channel members <channelId>
 #   workspace-channel who                        # list all members in the project
 #
-# Requires: ROUTER_URL, ROUTER_SERVICE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+# Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
 
 set -e
 
-# ── Preflight: check required env vars ──
+# ── Preflight ──
 missing=""
-[ -z "$ROUTER_URL" ] && missing="$missing ROUTER_URL"
-[ -z "$ROUTER_SERVICE_KEY" ] && missing="$missing ROUTER_SERVICE_KEY"
+[ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+[ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
 [ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
 [ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
 if [ -n "$missing" ]; then
   echo "Error: Missing required env vars:$missing"
-  echo "These are set during provisioning. If missing, the machine was provisioned without workspace context."
   exit 1
 fi
 
-API="${ROUTER_URL}/v1/agent"
-AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
-MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
-PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
+REST="${SUPABASE_URL}/rest/v1"
+AUTH_H="Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+KEY_H="apikey: ${SUPABASE_SERVICE_ROLE_KEY}"
 
 usage() {
   echo "Usage:"
@@ -44,15 +42,14 @@ usage() {
   exit 1
 }
 
-# Helper: run curl and show errors clearly
-api_call() {
+sb() {
   METHOD="$1"; shift
   URL="$1"; shift
   TMPFILE=$(mktemp)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
-    -H "$AUTH" -H "$MEMBER" -H "$PROJECT" "$@" 2>&1)
+    -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
   if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
-    echo "Error: HTTP $HTTP_CODE from $URL"
+    echo "Error: HTTP $HTTP_CODE"
     cat "$TMPFILE" 2>/dev/null
     rm -f "$TMPFILE"
     exit 1
@@ -80,25 +77,52 @@ case "${1:-}" in
       echo "Error: name is required"
       exit 1
     fi
-    BODY="{\"name\":\"$(echo "$NAME" | sed 's/"/\\"/g')\",\"kind\":\"$KIND\""
+
+    # Dedup: check if broadcast/team channel with same name already exists
+    if [ "$KIND" = "broadcast" ] || [ "$KIND" = "team" ]; then
+      EXISTING=$(curl -s "${REST}/channels?project_id=eq.${AGENT_PROJECT_ID}&name=eq.$(echo "$NAME" | sed 's/ /%20/g')&kind=eq.${KIND}&archived=eq.false&select=id,name,kind&limit=1" \
+        -H "$AUTH_H" -H "$KEY_H")
+      EXISTING_ID=$(echo "$EXISTING" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+      if [ -n "$EXISTING_ID" ]; then
+        # Ensure agent is a member, then return existing
+        sb POST "${REST}/channel_members" \
+          -H "Content-Type: application/json" \
+          -H "Prefer: resolution=ignore-duplicates" \
+          -d "{\"channel_id\":\"$EXISTING_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
+        echo "Channel already exists: #$NAME ($EXISTING_ID)"
+        exit 0
+      fi
+    fi
+
+    BODY="{\"project_id\":\"$AGENT_PROJECT_ID\",\"name\":\"$(echo "$NAME" | sed 's/"/\\"/g')\",\"kind\":\"$KIND\",\"created_by\":\"$AGENT_MEMBER_ID\""
     if [ -n "$DESC" ]; then
       BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
     fi
-    if [ -n "$MEMBERS" ]; then
-      # Convert comma-separated list to JSON array
-      MEMBER_ARRAY=$(echo "$MEMBERS" | sed 's/,/","/g')
-      BODY="$BODY,\"members\":[\"$MEMBER_ARRAY\"]"
-    fi
     BODY="$BODY}"
-    RESULT=$(api_call POST "${API}/channels" \
+
+    RESULT=$(sb POST "${REST}/channels" \
       -H "Content-Type: application/json" \
       -d "$BODY")
-    echo "$RESULT" | node -e "
-      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if(d.error){console.log('Error:',d.error);process.exit(1)}
-      console.log('Created channel: '+d.name+' ('+d.kind+')');
-      console.log('ID: '+d.id);
-    "
+    CHANNEL_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')")
+
+    if [ -n "$CHANNEL_ID" ]; then
+      # Add creator as member
+      sb POST "${REST}/channel_members" \
+        -H "Content-Type: application/json" \
+        -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1
+
+      # Add additional members
+      if [ -n "$MEMBERS" ]; then
+        for MID in $(echo "$MEMBERS" | tr ',' ' '); do
+          sb POST "${REST}/channel_members" \
+            -H "Content-Type: application/json" \
+            -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$MID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
+        done
+      fi
+
+      echo "Created channel: #$(echo "$NAME") ($KIND)"
+      echo "ID: $CHANNEL_ID"
+    fi
     ;;
 
   update)
@@ -108,57 +132,57 @@ case "${1:-}" in
       exit 1
     fi
     shift 2
-    BODY="{\"channelId\":\"$CHANNEL_ID\""
+    BODY="{"
+    FIRST=true
     while [ $# -gt 0 ]; do
       case "$1" in
-        --name)        BODY="$BODY,\"name\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
-        --description) BODY="$BODY,\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
-        --pinned)      BODY="$BODY,\"pinned\":true"; shift ;;
-        --no-pinned)   BODY="$BODY,\"pinned\":false"; shift ;;
-        *)             shift ;;
+        --name)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"name\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --description)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --pinned)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"pinned\":true"
+          FIRST=false; shift ;;
+        --no-pinned)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"pinned\":false"
+          FIRST=false; shift ;;
+        *) shift ;;
       esac
     done
     BODY="$BODY}"
-    RESULT=$(api_call PATCH "${API}/channels" \
+    sb PATCH "${REST}/channels?id=eq.${CHANNEL_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
       -H "Content-Type: application/json" \
-      -d "$BODY")
-    echo "$RESULT" | node -e "
-      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if(d.error){console.log('Error:',d.error);process.exit(1)}
-      console.log('Updated: '+d.name+(d.pinned?' [pinned]':'')+(d.archived?' [archived]':''));
-    "
+      -d "$BODY" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const c=Array.isArray(d)?d[0]:d;
+        if(c&&c.name){console.log('Updated: #'+c.name);}
+        else{console.log('Updated channel.');}
+      "
     ;;
 
   archive)
     CHANNEL_ID="$2"
-    if [ -z "$CHANNEL_ID" ]; then
-      echo "Error: channelId is required"
-      exit 1
-    fi
-    RESULT=$(api_call PATCH "${API}/channels" \
+    if [ -z "$CHANNEL_ID" ]; then echo "Error: channelId is required"; exit 1; fi
+    sb PATCH "${REST}/channels?id=eq.${CHANNEL_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
       -H "Content-Type: application/json" \
-      -d "{\"channelId\":\"$CHANNEL_ID\",\"archived\":true}")
-    echo "$RESULT" | node -e "
-      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if(d.error){console.log('Error:',d.error);process.exit(1)}
-      console.log('Archived: '+d.name);
-    "
+      -d '{"archived":true}' | \
+      node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=Array.isArray(d)?d[0]:d;console.log('Archived: #'+(c?.name||CHANNEL_ID))"
     ;;
 
   unarchive)
     CHANNEL_ID="$2"
-    if [ -z "$CHANNEL_ID" ]; then
-      echo "Error: channelId is required"
-      exit 1
-    fi
-    RESULT=$(api_call PATCH "${API}/channels" \
+    if [ -z "$CHANNEL_ID" ]; then echo "Error: channelId is required"; exit 1; fi
+    sb PATCH "${REST}/channels?id=eq.${CHANNEL_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
       -H "Content-Type: application/json" \
-      -d "{\"channelId\":\"$CHANNEL_ID\",\"archived\":false}")
-    echo "$RESULT" | node -e "
-      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if(d.error){console.log('Error:',d.error);process.exit(1)}
-      console.log('Unarchived: '+d.name);
-    "
+      -d '{"archived":false}' | \
+      node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=Array.isArray(d)?d[0]:d;console.log('Unarchived: #'+(c?.name||CHANNEL_ID))"
     ;;
 
   invite)
@@ -168,14 +192,10 @@ case "${1:-}" in
       echo "Error: workspace-channel invite <channelId> <memberId>"
       exit 1
     fi
-    RESULT=$(api_call POST "${API}/channels/members" \
+    sb POST "${REST}/channel_members" \
       -H "Content-Type: application/json" \
-      -d "{\"channelId\":\"$CHANNEL_ID\",\"memberId\":\"$TARGET_ID\"}")
-    echo "$RESULT" | node -e "
-      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if(d.error){console.log('Error:',d.error);process.exit(1)}
-      console.log('Invited '+d.memberId+' as '+d.role);
-    "
+      -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$TARGET_ID\",\"role\":\"participant\"}" | \
+      node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const m=Array.isArray(d)?d[0]:d;console.log('Invited '+(m?.member_id?.slice(0,8)||TARGET_ID)+' as '+(m?.role||'participant'))"
     ;;
 
   kick)
@@ -185,12 +205,8 @@ case "${1:-}" in
       echo "Error: workspace-channel kick <channelId> <memberId>"
       exit 1
     fi
-    RESULT=$(api_call DELETE "${API}/channels/members?channelId=${CHANNEL_ID}&memberId=${TARGET_ID}")
-    echo "$RESULT" | node -e "
-      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if(d.error){console.log('Error:',d.error);process.exit(1)}
-      console.log('Removed '+d.removed+' from channel');
-    "
+    sb DELETE "${REST}/channel_members?channel_id=eq.${CHANNEL_ID}&member_id=eq.${TARGET_ID}" | \
+      node -e "console.log('Removed from channel.')"
     ;;
 
   members)
@@ -199,29 +215,27 @@ case "${1:-}" in
       echo "Error: workspace-channel members <channelId>"
       exit 1
     fi
-    api_call GET "${API}/channels/members?channelId=${CHANNEL_ID}" | \
+    sb GET "${REST}/channel_members?channel_id=eq.${CHANNEL_ID}&select=member_id,role,members!inner(id,display_name,instance_id,rank,status)" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        if(d.error){console.log('Error:',d.error);process.exit(1)}
-        (d.members||[]).forEach(m=>{
-          const tag=m.type==='agent'?'[bot]':'';
-          const role=m.role==='owner'?'(owner)':m.role==='observer'?'(observer)':'';
-          console.log(m.memberId.slice(0,8)+' '+m.displayName+tag+' ['+m.rank+'] '+m.status+' '+role);
+        if(!Array.isArray(d)||!d.length){console.log('No members found.');process.exit(0)}
+        d.forEach(cm=>{
+          const m=cm.members;if(!m)return;
+          const tag=m.instance_id?'[bot]':'';
+          console.log(m.id.slice(0,8)+' '+m.display_name+tag+' ['+m.rank+'] '+m.status);
         });
-        if(!(d.members||[]).length) console.log('No members found.');
       "
     ;;
 
   who)
-    api_call GET "${API}/members" | \
+    sb GET "${REST}/members?project_id=eq.${AGENT_PROJECT_ID}&status=neq.archived&select=id,display_name,instance_id,rank,status&order=rank.asc" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        if(d.error){console.log('Error:',d.error);process.exit(1)}
-        (d.members||[]).forEach(m=>{
-          const tag=m.type==='agent'?'[bot]':'';
-          console.log(m.id+' '+m.displayName+tag+' ['+m.rank+'] '+m.status);
+        if(!Array.isArray(d)||!d.length){console.log('No members found.');process.exit(0)}
+        d.forEach(m=>{
+          const tag=m.instance_id?'[bot]':'';
+          console.log(m.id+' '+m.display_name+tag+' ['+m.rank+'] '+m.status);
         });
-        if(!(d.members||[]).length) console.log('No members found.');
       "
     ;;
 

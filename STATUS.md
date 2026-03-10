@@ -14,55 +14,71 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Agent provisioning on Fly.io (full lifecycle, retries, health checks)
 - [x] DM streaming chat with tool badges (WebSocket bridge in API route)
 - [x] Heartbeat cron (sends "HEARTBEAT" to all running agents every 10 min)
-- [x] Agent API routes (messages, tasks, channels — agents CAN call these)
-- [x] Workspace CLI tools on agent machines (workspace-msg, workspace-task)
+- [x] Agent API routes (messages, tasks, channels, members — agents CAN call these)
+- [x] Workspace CLI tools on agent machines (workspace-msg, workspace-task, workspace-channel)
 - [x] Credit/usage tracking
 - [x] Agent dashboard (personality, memory, skills, config, knowledge graph)
 - [x] Creator platform (publish, analytics, earnings)
-- [x] Workspace bootstrap (corp creation, co-founder auto-hire, DM channel)
+- [x] Workspace bootstrap (corp creation, co-founder auto-hire, DM channel, #general, #tasks)
 - [x] Supabase Realtime for message updates
 - [x] Stable session keys (agent remembers conversation context)
+- [x] Broadcast channel pages with streaming chat (`/workspace/c/[channelId]`)
+- [x] Channel list in sidebar (broadcast channels with Hash icons)
+- [x] Task board UI (`/workspace/tasks`) — list view with status/priority filters
+- [x] Task creation dialog with title, description, priority, assignee picker
+- [x] Task detail page (`/workspace/tasks/[taskId]`) with thread chat
+- [x] Task-channel integration (announcements in #tasks, thread_root_id stored)
+- [x] Task dispatch to agents via Trigger.dev (`dispatch-task-to-agent`)
+- [x] Project creation + switching in sidebar (workspace-switcher dropdown)
+- [x] Channel member sidebar on all page types (channels, DMs, task threads)
+- [x] Rank checks on channel operations (subagent blocked, broadcast requires master/leader)
+- [x] Service key auth on all agent API routes
+- [x] Typing indicators (bounce animation during streaming)
 
 ---
 
-## SKELETON — schema/types exist, no UI or wiring
+## PARTIALLY BUILT — code exists, not fully working
 
-### Corporations & Projects
-- [ ] Corporation management UI (create, rename, switch between corps)
-- [ ] Project browser/creation UI
-- [ ] Project settings page
-- [ ] Multi-project support in sidebar (icon tray like Discord servers)
+### Agent Workspace Env Vars
+- [x] Provisioning code passes `ROUTER_URL`, `ROUTER_SERVICE_KEY`, `AGENT_PROJECT_ID`, `AGENT_MEMBER_ID`
+- [ ] **BROKEN**: Trigger.dev cloud env missing `ROUTER_URL` + `ROUTER_SERVICE_KEY` — agents provisioned without workspace context
+- [ ] **BROKEN**: Current co-founder machine has old image (`openagents-agent-base:latest`) with no workspace env vars
 
-### Teams
-- [ ] Team creation UI
-- [ ] Team management page (add/remove members, set leader)
-- [ ] Team hierarchy visualization (nested teams)
-- [ ] Auto-create `#team-{name}` channel when team is created
-- [ ] Team leader assignment and role enforcement
-
-### Channels (beyond DMs)
-- [ ] Channel browser page (`/workspace/c/[channelId]`)
-- [ ] Broadcast channel messaging (#general works for agents, not in UI)
-- [ ] Team channel messaging (#team-* channels)
-- [ ] System channel (activity feed)
-- [ ] Channel creation UI
-- [ ] Channel member management
-- [ ] Channel list in sidebar (broadcast + team channels, not just DMs)
-
-### Tasks
-- [ ] Task board UI in workspace (`/workspace/tasks`) — kanban with drag-drop
-- [ ] Task detail sheet (edit title, description, priority, assignee, status)
-- [ ] Task creation dialog from UI
-- [ ] Task assignment to specific agents/members
-- [ ] Task hierarchy visualization (parent → subtasks)
-- [ ] Task-channel integration (task events as system messages in channels)
-- [ ] Inline task cards in message feed (`message_kind = 'task_event'`)
+### Tasks (partially working)
+- [x] Task CRUD (create, list, update, delete) — server actions + API routes
+- [x] Task detail sheet (edit title, description, priority, assignee, status)
+- [x] Task assignment to specific agents/members
+- [x] Task announcement in #tasks channel with thread root
+- [x] Autonomous dispatch via Trigger.dev background task
+- [ ] Agent can't actually see tasks (no workspace env vars on machine)
+- [ ] Task hierarchy visualization (parent → subtasks) — schema exists, no UI
+- [ ] Inline task cards in message feed (`message_kind = 'task_event'`) — not rendered
 - [ ] Task creation via chat (co-founder creates tasks from conversation)
 
+### Channels
+- [x] Channel page with streaming + member sidebar
+- [x] Broadcast channel messaging works in UI
+- [x] Channel dedup in API (same name+kind = return existing)
+- [ ] Channel creation UI for users (API-only, no dialog)
+- [ ] Channel member management UI (API-only, no add/remove in UI)
+- [ ] Team channel messaging (no team channels exist yet)
+- [ ] System channel / activity feed
+
 ### Members
-- [ ] Member management page (see all members in project, their ranks, status)
-- [ ] Member status indicators across UI (idle, working, offline, suspended)
+- [x] Members API for agents (`/api/v1/agent/members`, `/api/v1/agent/channels/members`)
+- [x] Member data displayed in channel member sidebar
+- [ ] Member management page (see all members, ranks, status)
+- [ ] Member status indicators across UI (idle, working, offline)
 - [ ] Member profile pages
+
+### Messages
+- [x] Text + tool_result message rendering with markdown
+- [x] Thread messages hook (`use-thread-messages.ts`) — loads via `parent_id`
+- [x] Realtime subscriptions for new messages
+- [ ] System message renderers (`message_kind = 'system'` stored but not styled differently)
+- [ ] Task event renderers (`message_kind = 'task_event'`)
+- [ ] Message editing/deletion
+- [ ] Thread indicators in channel view (show reply count, link to thread)
 
 ---
 
@@ -72,7 +88,6 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [ ] @mention extraction wired into marketplace message flow (core router has `extractMentions()` but it's dead code)
 - [ ] @mention routing — when agent posts "@ResearchAgent check this", Router wakes ResearchAgent
 - [ ] @mention autocomplete in chat composer UI
-- [ ] Agents receiving messages in channels (not just DMs)
 - [ ] Fan-out dispatch (user mentions multiple agents → all wake in parallel)
 - [ ] Chain dispatch (agent mentions another agent → async chaining up to depth 5)
 - [ ] Agent-to-agent conversations in team channel threads
@@ -80,25 +95,26 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [ ] Dedup guard (agent only woken once per originating message — exists in core, not connected)
 - [ ] Cooldown guard (skip if agent already working — exists in core, not connected)
 
+### Teams
+- [ ] Team creation UI
+- [ ] Team management page (add/remove members, set leader)
+- [ ] Team hierarchy visualization (nested teams)
+- [ ] Auto-create `#team-{name}` channel when team is created
+- [ ] Team leader assignment and role enforcement
+
 ### Autonomous Agent Actions
 - [ ] Agent-initiated hiring — agent calls API to hire another agent from marketplace
 - [ ] Agent-initiated firing — agent calls API to remove underperforming agent
 - [ ] Agent creating projects
 - [ ] Agent creating teams
-- [ ] Agent creating channels
 - [ ] Agent assigning tasks to other agents
-- [ ] Agent managing team membership
 - [ ] Approval flow for autonomous actions (co-founder proposes, user approves)
 - [ ] Autonomous pipeline execution (Research → Writer → Editor → user approval)
 
-### Rank-Based Authorization
-- [ ] Middleware checking rank before operations on all agent API routes
-- [ ] Owner/master: hire/fire, create/delete channels, manage all tasks
-- [ ] Leader: manage tasks within team, hire into team
-- [ ] Worker: create/update own tasks, send messages
-- [ ] Subagent: send messages only
+### Rank-Based Authorization (partial)
+- [x] Channel create/update checks rank (subagent blocked, broadcast requires master/leader)
+- [ ] Full middleware checking rank on ALL agent API routes
 - [ ] Rank validation on team operations
-- [ ] Rank validation on channel operations
 - [ ] Rank validation on member management
 
 ### Sub-Agent Spawning
@@ -127,13 +143,6 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [ ] System messages for: agent hired, task created, status changed, decisions made
 - [ ] Thread expansion — click to see full agent-to-agent work conversation
 - [ ] File browser for agent workspace files (edit SOUL.md, MEMORY.md live)
-
-### Message System Gaps
-- [ ] System message renderers (`message_kind = 'system'` — hiring, status changes)
-- [ ] Task event renderers (`message_kind = 'task_event'` — inline task cards)
-- [ ] Thread support (reply chains, thread indicators)
-- [ ] Message editing/deletion
-- [ ] Typing indicators for agents working in channels
 
 ### Git Corporation
 - [ ] Corporation state as a git repo (every agent change = commit)
@@ -231,24 +240,30 @@ These pieces are built but not wired together:
 | @mention extraction | `packages/core/src/router.ts` → `extractMentions()` | Dead code in marketplace |
 | Message routing with guards | `packages/core/src/router.ts` → `sendMessage()` | Not used by marketplace APIs |
 | Depth/dedup/cooldown guards | `packages/core/src/router.ts` | Not connected |
-| Agent API for messages | `/api/v1/agent/messages` | Working but agents don't call each other |
-| Agent API for tasks | `/api/v1/agent/tasks` | Working but no UI |
-| Agent API for channels | `/api/v1/agent/channels` | Working but no UI |
-| Workspace CLI tools | `workspace-msg`, `workspace-task` in Docker image | Working, agents use them |
-| Member ranks in DB | `members.rank` column | No authorization checks |
+| Agent API for messages | `/api/v1/agent/messages` | Working — agents can post to channels |
+| Agent API for tasks | `/api/v1/agent/tasks` | Working — UI exists at `/workspace/tasks` |
+| Agent API for channels | `/api/v1/agent/channels` | Working — UI exists at `/workspace/c/[id]` |
+| Workspace CLI tools | `workspace-msg`, `workspace-task`, `workspace-channel` | Working in Docker image |
+| Member ranks in DB | `members.rank` column | Partial auth checks (channel ops only) |
 | Team hierarchy in DB | `teams.parent_id` column | No UI |
 | Task hierarchy in DB | `tasks.parent_task_id` column | No UI |
-| Corporation table | `corporations` | No UI |
+| Corporation table | `corporations` | Name shown in sidebar, no management UI |
+
+### Immediate Blockers
+1. **Agent machine needs re-provisioning** — old image, no workspace env vars
+2. **Trigger.dev cloud needs `ROUTER_URL` + `ROUTER_SERVICE_KEY`** — without these, no agent gets workspace context
+3. **Vercel stable URL needed** — `ROUTER_URL` must be the dev branch alias, not localhost
 
 ### The Critical Path
 The shortest path to "agents acting autonomously in a visible workspace":
 
-1. **@mention routing** — connect `packages/core` router to marketplace message flow
-2. **Channel UI** — let users see broadcast/team channels, not just DMs
-3. **Agent-to-agent dispatch** — when agent posts in channel with @mention, wake the target
-4. **Task board UI** — let users see what agents are working on
-5. **System messages** — show hiring, task events, status changes in channels
-6. **Autonomous actions API** — let agents hire, create teams, assign tasks
-7. **Onboarding flow** — co-founder builds the workspace through conversation
+1. ~~**Channel UI** — let users see broadcast/team channels, not just DMs~~ DONE
+2. ~~**Task board UI** — let users see what agents are working on~~ DONE
+3. **Fix agent provisioning** — agents need workspace env vars to actually work
+4. **@mention routing** — connect `packages/core` router to marketplace message flow
+5. **Agent-to-agent dispatch** — when agent posts in channel with @mention, wake the target
+6. **System messages** — show hiring, task events, status changes in channels
+7. **Autonomous actions API** — let agents hire, create teams, assign tasks
+8. **Onboarding flow** — co-founder builds the workspace through conversation
 
-Without #1-3, agents are isolated chatbots. With them, the corporation comes alive.
+Without #4-5, agents are isolated chatbots. With them, the corporation comes alive.

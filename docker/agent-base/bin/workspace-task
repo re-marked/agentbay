@@ -1,31 +1,29 @@
 #!/bin/sh
-# workspace-task — create, list, and update tasks
+# workspace-task — create, list, and update tasks (direct Supabase)
 # Usage:
 #   workspace-task create "title" [--description "..."] [--priority high|normal|low] [--assign <memberId>]
 #   workspace-task list [--status pending|assigned|in_progress|completed|failed] [--priority high] [--mine]
 #   workspace-task update <taskId> --status in_progress
 #   workspace-task update <taskId> --status completed
 #
-# Requires: ROUTER_URL, ROUTER_SERVICE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+# Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
 
 set -e
 
-# ── Preflight: check required env vars ──
+# ── Preflight ──
 missing=""
-[ -z "$ROUTER_URL" ] && missing="$missing ROUTER_URL"
-[ -z "$ROUTER_SERVICE_KEY" ] && missing="$missing ROUTER_SERVICE_KEY"
+[ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+[ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
 [ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
 [ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
 if [ -n "$missing" ]; then
   echo "Error: Missing required env vars:$missing"
-  echo "These are set during provisioning. If missing, the machine was provisioned without workspace context."
   exit 1
 fi
 
-API="${ROUTER_URL}/v1/agent"
-AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
-MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
-PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
+REST="${SUPABASE_URL}/rest/v1"
+AUTH_H="Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+KEY_H="apikey: ${SUPABASE_SERVICE_ROLE_KEY}"
 
 usage() {
   echo "Usage:"
@@ -35,15 +33,15 @@ usage() {
   exit 1
 }
 
-# Helper: run curl and show errors clearly
-api_call() {
+# Helper: curl with auth headers, check for errors
+sb() {
   METHOD="$1"; shift
   URL="$1"; shift
   TMPFILE=$(mktemp)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
-    -H "$AUTH" -H "$MEMBER" -H "$PROJECT" "$@" 2>&1)
+    -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
   if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
-    echo "Error: HTTP $HTTP_CODE from $URL"
+    echo "Error: HTTP $HTTP_CODE"
     cat "$TMPFILE" 2>/dev/null
     rm -f "$TMPFILE"
     exit 1
@@ -71,43 +69,70 @@ case "${1:-}" in
       echo "Error: title is required"
       exit 1
     fi
-    BODY="{\"title\":\"$(echo "$TITLE" | sed 's/"/\\"/g')\",\"priority\":\"$PRIORITY\""
+
+    # Determine status and assignee
+    STATUS="pending"
+    ASSIGN_VAL="null"
+    if [ -n "$ASSIGN" ]; then
+      STATUS="assigned"
+      ASSIGN_VAL="\"$ASSIGN\""
+    fi
+
+    BODY="{\"project_id\":\"$AGENT_PROJECT_ID\",\"title\":\"$(echo "$TITLE" | sed 's/"/\\"/g')\",\"priority\":\"$PRIORITY\",\"status\":\"$STATUS\",\"assigned_to\":$ASSIGN_VAL,\"created_by\":\"$AGENT_MEMBER_ID\""
     if [ -n "$DESC" ]; then
       BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
     fi
-    if [ -n "$ASSIGN" ]; then
-      BODY="$BODY,\"assignedTo\":\"$ASSIGN\""
-    fi
     BODY="$BODY}"
-    api_call POST "${API}/tasks" \
+
+    RESULT=$(sb POST "${REST}/tasks" \
       -H "Content-Type: application/json" \
-      -d "$BODY"
-    echo
+      -d "$BODY")
+
+    # Announce in #tasks channel
+    TASKS_CHANNEL_ID=$(curl -s "${REST}/channels?project_id=eq.${AGENT_PROJECT_ID}&kind=eq.broadcast&name=eq.tasks&archived=eq.false&select=id&limit=1" \
+      -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+
+    if [ -n "$TASKS_CHANNEL_ID" ]; then
+      TASK_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')")
+      ANNOUNCE="📋 New task: **${TITLE}** [${PRIORITY}]"
+      if [ -n "$ASSIGN" ]; then
+        ANNOUNCE="$ANNOUNCE — assigned"
+      fi
+      sb POST "${REST}/channel_messages" \
+        -H "Content-Type: application/json" \
+        -d "{\"channel_id\":\"$TASKS_CHANNEL_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$(echo "$ANNOUNCE" | sed 's/"/\\"/g')\",\"message_kind\":\"system\"}" > /dev/null 2>&1 || true
+    fi
+
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      const t=Array.isArray(d)?d[0]:d;
+      if(t&&t.id){console.log('Created: '+t.title+' ('+t.id.slice(0,8)+')');}
+      else{console.log('Created task.');}
+    "
     ;;
 
   list)
     shift
-    QUERY=""
+    FILTERS="project_id=eq.${AGENT_PROJECT_ID}"
+    LIMIT="50"
     while [ $# -gt 0 ]; do
       case "$1" in
-        --status)   QUERY="${QUERY}&status=$2"; shift 2 ;;
-        --priority) QUERY="${QUERY}&priority=$2"; shift 2 ;;
-        --mine)     QUERY="${QUERY}&assignee=me"; shift ;;
-        --limit)    QUERY="${QUERY}&limit=$2"; shift 2 ;;
+        --status)   FILTERS="${FILTERS}&status=eq.$2"; shift 2 ;;
+        --priority) FILTERS="${FILTERS}&priority=eq.$2"; shift 2 ;;
+        --mine)     FILTERS="${FILTERS}&assigned_to=eq.${AGENT_MEMBER_ID}"; shift ;;
+        --limit)    LIMIT="$2"; shift 2 ;;
         *)          shift ;;
       esac
     done
-    QUERY="$(echo "$QUERY" | sed 's/^&//')"
-    api_call GET "${API}/tasks?${QUERY}" | \
+    sb GET "${REST}/tasks?${FILTERS}&order=created_at.desc&limit=${LIMIT}&select=id,title,description,status,priority,assigned_to,created_at" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        if(d.error){console.log('API Error:',d.error);process.exit(1)}
-        (d.tasks||[]).forEach(t=>{
-          const pri=t.priority==='high'?'!!':t.priority==='low'?'..':'  ';
+        if(!Array.isArray(d)||!d.length){console.log('No tasks found.');process.exit(0)}
+        d.forEach(t=>{
+          const pri=t.priority==='urgent'?'‼️':t.priority==='high'?'!!':t.priority==='low'?'..':'  ';
           console.log(pri+' ['+t.status+'] '+t.title+' ('+t.id.slice(0,8)+')');
           if(t.description) console.log('   '+t.description.slice(0,120));
         });
-        if(!(d.tasks||[]).length) console.log('No tasks found.');
       "
     ;;
 
@@ -118,22 +143,51 @@ case "${1:-}" in
       exit 1
     fi
     shift 2
-    BODY="{\"taskId\":\"$TASK_ID\""
+    # Build PATCH body
+    BODY="{"
+    FIRST=true
     while [ $# -gt 0 ]; do
       case "$1" in
-        --status)      BODY="$BODY,\"status\":\"$2\""; shift 2 ;;
-        --priority)    BODY="$BODY,\"priority\":\"$2\""; shift 2 ;;
-        --title)       BODY="$BODY,\"title\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
-        --description) BODY="$BODY,\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""; shift 2 ;;
-        --assign)      BODY="$BODY,\"assignedTo\":\"$2\""; shift 2 ;;
-        *)             shift ;;
+        --status)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"status\":\"$2\""
+          # Auto-set timestamps
+          if [ "$2" = "in_progress" ]; then
+            BODY="$BODY,\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+          elif [ "$2" = "completed" ] || [ "$2" = "failed" ] || [ "$2" = "cancelled" ]; then
+            BODY="$BODY,\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+          fi
+          FIRST=false; shift 2 ;;
+        --priority)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"priority\":\"$2\""
+          FIRST=false; shift 2 ;;
+        --title)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"title\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --description)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --assign)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"assigned_to\":\"$2\""
+          FIRST=false; shift 2 ;;
+        *)  shift ;;
       esac
     done
     BODY="$BODY}"
-    api_call PATCH "${API}/tasks" \
+
+    sb PATCH "${REST}/tasks?id=eq.${TASK_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
       -H "Content-Type: application/json" \
-      -d "$BODY"
-    echo
+      -d "$BODY" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const t=Array.isArray(d)?d[0]:d;
+        if(t&&t.title){console.log('Updated: '+t.title+' → '+t.status);}
+        else{console.log('Updated task.');}
+      "
     ;;
 
   *)

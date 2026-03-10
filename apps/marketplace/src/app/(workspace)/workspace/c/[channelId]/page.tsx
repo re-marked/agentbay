@@ -6,6 +6,7 @@ import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Hash } from 'lucide-react'
 import { getActiveProjectId } from '@/lib/projects/queries'
+import { ChannelMemberList, type MemberInfo } from '@/components/channel-member-list'
 
 export default async function ChannelPage({
   params,
@@ -95,6 +96,15 @@ export default async function ChannelPage({
   // Enable streaming for DM channels that have an agent member
   const hasAgent = !!agentInstanceId
 
+  // Build member list for the sidebar
+  const membersList: MemberInfo[] = Object.entries(membersMap).map(([id, m]) => ({
+    id,
+    displayName: m.displayName,
+    type: m.type as 'user' | 'agent',
+    iconUrl: m.iconUrl,
+    category: m.category,
+  }))
+
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border/40 bg-background px-4">
@@ -112,17 +122,20 @@ export default async function ChannelPage({
         )}
       </header>
 
-      <ChannelChat
-        channelId={channelId}
-        userMemberId={userMemberId}
-        members={membersMap}
-        placeholder={`Message #${channel.name}`}
-        streaming={hasAgent}
-        instanceId={agentInstanceId}
-        agentName={agentName}
-        agentCategory={agentCategory}
-        agentIconUrl={agentIconUrl}
-      />
+      <div className="flex flex-1 min-h-0">
+        <ChannelChat
+          channelId={channelId}
+          userMemberId={userMemberId}
+          members={membersMap}
+          placeholder={`Message #${channel.name}`}
+          streaming={hasAgent}
+          instanceId={agentInstanceId}
+          agentName={agentName}
+          agentCategory={agentCategory}
+          agentIconUrl={agentIconUrl}
+        />
+        <ChannelMemberList members={membersList} />
+      </div>
     </div>
   )
 }

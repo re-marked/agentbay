@@ -6,6 +6,7 @@ import { ChannelChat } from '@/components/channel-chat'
 import { TaskDetailHeader } from '@/components/tasks/task-detail-header'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
+import { ChannelMemberList } from '@/components/channel-member-list'
 
 export default async function TaskDetailPage({
   params,
@@ -134,19 +135,30 @@ export default async function TaskDetailPage({
       />
 
       {hasThread ? (
-        <ChannelChat
-          channelId={channelId}
-          userMemberId={userMemberId}
-          instanceId={instanceId}
-          members={membersMap}
-          agentName={agentName}
-          agentCategory={agentCategory}
-          agentIconUrl={agentIconUrl}
-          placeholder={`Message about this task...`}
-          streaming={!!instanceId}
-          threadId={threadRootId}
-          taskId={taskId}
-        />
+        <div className="flex flex-1 min-h-0">
+          <ChannelChat
+            channelId={channelId}
+            userMemberId={userMemberId}
+            instanceId={instanceId}
+            members={membersMap}
+            agentName={agentName}
+            agentCategory={agentCategory}
+            agentIconUrl={agentIconUrl}
+            placeholder={`Message about this task...`}
+            streaming={!!instanceId}
+            threadId={threadRootId}
+            taskId={taskId}
+          />
+          <ChannelMemberList
+            members={Object.entries(membersMap).map(([id, m]) => ({
+              id,
+              displayName: m.displayName,
+              type: m.type as 'user' | 'agent',
+              iconUrl: m.iconUrl,
+              category: m.category,
+            }))}
+          />
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center space-y-2">

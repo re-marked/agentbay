@@ -184,7 +184,7 @@ fi
 # ── 3b. Inject workspace tools reference into AGENTS.md (once, idempotent)
 # OpenClaw auto-loads AGENTS.md as system instructions. Without this, agents
 # won't know about workspace-msg / workspace-task CLI tools.
-if [ -n "$ROUTER_URL" ]; then
+if [ -n "$SUPABASE_URL" ]; then
   # Create AGENTS.md if it doesn't exist yet (OpenClaw creates it on first run, but we need it now)
   [ -f /data/workspace/AGENTS.md ] || touch /data/workspace/AGENTS.md
   if ! grep -q "Workspace Tools" /data/workspace/AGENTS.md; then

@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     }
   }
 
-  // 4. Persist user message (with thread_id if in thread mode)
+  // 4. Persist user message (with parent_id if in thread mode)
   const { data: userMsg, error: msgErr } = await service
     .from('channel_messages')
     .insert({
@@ -103,7 +103,7 @@ export async function POST(request: Request) {
       content,
       message_kind: 'text',
       depth: threadId ? 1 : 0,
-      ...(threadId ? { thread_id: threadId } : {}),
+      ...(threadId ? { parent_id: threadId } : {}),
     })
     .select('id')
     .single()
@@ -209,7 +209,7 @@ export async function POST(request: Request) {
     .limit(30)
 
   if (threadId) {
-    historyQuery = historyQuery.or(`id.eq.${threadId},thread_id.eq.${threadId}`)
+    historyQuery = historyQuery.or(`id.eq.${threadId},parent_id.eq.${threadId}`)
   }
 
   const { data: history } = await historyQuery
@@ -250,7 +250,7 @@ export async function POST(request: Request) {
               depth: 1,
               origin_id: userMsg.id,
               parent_id: userMsg.id,
-              ...(threadId ? { thread_id: threadId } : {}),
+              ...(threadId ? { parent_id: threadId } : {}),
               metadata: {
                 id: tool.id,
                 tool: tool.tool,
@@ -276,7 +276,7 @@ export async function POST(request: Request) {
               depth: 1,
               origin_id: userMsg.id,
               parent_id: userMsg.id,
-              ...(threadId ? { thread_id: threadId } : {}),
+              ...(threadId ? { parent_id: threadId } : {}),
             })
         }
 

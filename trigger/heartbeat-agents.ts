@@ -130,7 +130,7 @@ async function dispatchStaleTasks(
     const { count } = await db
       .from('channel_messages')
       .select('id', { count: 'exact', head: true })
-      .eq('thread_id', threadRootId)
+      .eq('parent_id', threadRootId)
       .gt('created_at', tenMinutesAgo)
 
     if (count && count > 0) continue // Recent activity exists, skip
