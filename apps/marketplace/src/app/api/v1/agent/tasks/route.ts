@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@agentbay/db/server'
 import { authenticateAgent } from '@/lib/auth/service-key'
+import { announceAndDispatchTask, dispatchTaskToAssignee } from '@/lib/workspace/task-dispatch'
 
 /**
  * POST /api/v1/agent/tasks — Create a task
@@ -37,6 +38,21 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  // Announce in #tasks + dispatch to assignee
+  try {
+    await announceAndDispatchTask(db, auth.projectId, {
+      id: task.id,
+      title,
+      description: description ?? null,
+      priority,
+      assignedTo: assignedTo ?? null,
+      createdBy: auth.memberId,
+    })
+  } catch (err) {
+    console.error('[agent/tasks POST] announce+dispatch failed:', err)
+    // Don't fail the request — task was created successfully
   }
 
   return NextResponse.json(task)
@@ -112,6 +128,49 @@ export async function PATCH(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  // If assignee changed, announce + dispatch to new assignee
+  if (updates.assignedTo) {
+    try {
+      const { data: fullTask } = await db
+        .from('tasks')
+        .select('title, description, priority, channel_id, metadata')
+        .eq('id', taskId)
+        .single()
+
+      if (fullTask) {
+        const metadata = (fullTask.metadata ?? {}) as Record<string, unknown>
+        const threadRootId = metadata.thread_root_id as string | undefined
+        const channelId = fullTask.channel_id as string | undefined
+
+        if (threadRootId && channelId) {
+          // Already has thread → just dispatch to new assignee
+          await dispatchTaskToAssignee(
+            db,
+            updates.assignedTo,
+            taskId,
+            fullTask.title,
+            fullTask.description,
+            fullTask.priority,
+            channelId,
+            threadRootId,
+          )
+        } else {
+          // No thread yet → full announce + dispatch
+          await announceAndDispatchTask(db, auth.projectId, {
+            id: taskId,
+            title: fullTask.title,
+            description: fullTask.description,
+            priority: fullTask.priority,
+            assignedTo: updates.assignedTo,
+            createdBy: auth.memberId,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[agent/tasks PATCH] dispatch failed:', err)
+    }
   }
 
   return NextResponse.json(task)
