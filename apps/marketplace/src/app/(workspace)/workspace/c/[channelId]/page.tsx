@@ -2,12 +2,11 @@ import { getUser } from '@/lib/auth/get-user'
 import { createServiceClient } from '@agentbay/db/server'
 import { redirect } from 'next/navigation'
 import { ChannelChat } from '@/components/channel-chat'
-import { Separator } from '@/components/ui/separator'
-import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Hash } from 'lucide-react'
 import { getActiveProjectId } from '@/lib/projects/queries'
 import { ChannelMemberList, type MemberInfo } from '@/components/channel-member-list'
 import { DebugPageContext } from '@/components/debug/debug-page-context'
+import { SetPageSegment } from '@/components/workspace-header'
 
 export default async function ChannelPage({
   params,
@@ -109,6 +108,7 @@ export default async function ChannelPage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+      <SetPageSegment icon={<Hash className="size-3.5" />} label={channel.name} />
       <DebugPageContext data={{
         page: 'channel',
         channelId: channelId,
@@ -119,20 +119,6 @@ export default async function ChannelPage({
         hasAgent: hasAgent ? 'true' : 'false',
         memberCount: String(membersList.length),
       }} />
-      <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border/40 bg-background px-4">
-        <SidebarTrigger className="-ml-1" />
-        <Separator
-          orientation="vertical"
-          className="mr-1 data-[orientation=vertical]:h-4"
-        />
-        <Hash className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">{channel.name}</span>
-        {channel.description && (
-          <span className="text-xs text-muted-foreground truncate hidden sm:block">
-            — {channel.description}
-          </span>
-        )}
-      </header>
 
       <div className="flex flex-1 min-h-0">
         <ChannelChat

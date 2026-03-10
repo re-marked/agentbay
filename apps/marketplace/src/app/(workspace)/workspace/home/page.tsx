@@ -1,12 +1,13 @@
 import { getUser } from '@/lib/auth/get-user'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Plus } from 'lucide-react'
+import { Plus, Home } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProvisioningPoller } from '@/components/provisioning-poller'
 import { OnboardingWizard } from '@/components/onboarding-wizard'
 import { HiredAgentGrid, type HiredAgent } from '@/components/hired-agent-grid'
 import { getActiveProjectId, getProjectAgents, toAgentInfoList } from '@/lib/projects/queries'
+import { SetPageSegment } from '@/components/workspace-header'
 
 export default async function HomePage() {
   const user = await getUser()
@@ -23,6 +24,7 @@ export default async function HomePage() {
 
   return (
     <div className="flex-1 overflow-y-auto px-8 py-8 lg:px-12">
+      <SetPageSegment icon={<Home className="size-3.5" />} label="Home" />
       {needsOnboarding ? (
         <OnboardingWizard
           corporationId={corporationId}
