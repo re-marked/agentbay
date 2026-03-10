@@ -12,6 +12,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -436,17 +437,19 @@ function TeamCategory({
     <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
       <SidebarGroup className="py-0">
         <SidebarGroupLabel asChild>
-          <CollapsibleTrigger className="group/team-label flex w-full items-center gap-1">
+          <CollapsibleTrigger className="flex w-full items-center gap-1">
             <ChevronRight className="size-3 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
             <span className="truncate uppercase tracking-wider">{team.name}</span>
             {teamHasUnread && !open && (
               <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
             )}
-            <span className="ml-auto opacity-0 group-hover/team-label:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-              <AddAgentToTeamDialog teamId={team.id} teamName={team.name} agents={allAgents} />
-            </span>
           </CollapsibleTrigger>
         </SidebarGroupLabel>
+        <AddAgentToTeamDialog teamId={team.id} teamName={team.name} agents={allAgents}>
+          <SidebarGroupAction title="Add agent to team">
+            <Plus className="size-4" />
+          </SidebarGroupAction>
+        </AddAgentToTeamDialog>
         <CollapsibleContent>
           <SidebarGroupContent>
             <SidebarMenu>
