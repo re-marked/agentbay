@@ -92,7 +92,7 @@ async function loadTeamsWithChannels(projectId: string) {
   const [{ data: teams }, { data: teamChannels }] = await Promise.all([
     db
       .from('teams')
-      .select('id, name, description, leader_member_id')
+      .select('id, name, description, leader_member_id, members!teams_leader_member_id_fkey(id, display_name, instance_id, status)')
       .eq('project_id', projectId)
       .neq('status', 'archived')
       .order('name', { ascending: true }),
@@ -107,6 +107,25 @@ async function loadTeamsWithChannels(projectId: string) {
 
   if (!teams?.length) return []
 
+  // Resolve leader instance statuses for provisioning indicator
+  const leaderInstanceIds = teams
+    .map(t => (t.members as any)?.instance_id)
+    .filter(Boolean) as string[]
+
+  let instanceStatusMap: Record<string, string> = {}
+  if (leaderInstanceIds.length > 0) {
+    const { data: instances } = await db
+      .from('agent_instances')
+      .select('id, status')
+      .in('id', leaderInstanceIds)
+
+    if (instances) {
+      for (const inst of instances) {
+        instanceStatusMap[inst.id] = inst.status
+      }
+    }
+  }
+
   // Group channels by team
   const channelsByTeam = new Map<string, typeof teamChannels>()
   for (const ch of teamChannels ?? []) {
@@ -116,14 +135,24 @@ async function loadTeamsWithChannels(projectId: string) {
     channelsByTeam.set(ch.team_id, list)
   }
 
-  return teams.map(t => ({
-    id: t.id,
-    name: t.name,
-    description: t.description,
-    channels: (channelsByTeam.get(t.id) ?? []).map(ch => ({
-      id: ch.id,
-      name: ch.name,
-      description: ch.description,
-    })),
-  }))
+  return teams.map(t => {
+    const leader = t.members as { id: string; display_name: string; instance_id: string | null; status: string } | null
+    const leaderInstanceId = leader?.instance_id ?? null
+    return {
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      leader: leader ? {
+        memberId: leader.id,
+        displayName: leader.display_name,
+        instanceId: leaderInstanceId,
+        status: leaderInstanceId ? (instanceStatusMap[leaderInstanceId] ?? 'unknown') : 'unknown',
+      } : null,
+      channels: (channelsByTeam.get(t.id) ?? []).map(ch => ({
+        id: ch.id,
+        name: ch.name,
+        description: ch.description,
+      })),
+    }
+  })
 }
