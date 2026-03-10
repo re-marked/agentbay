@@ -12,7 +12,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -27,7 +26,6 @@ import { AgentAvatar } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
 import { CreateTeamDialog } from "@/components/create-team-dialog"
-import { AddAgentToTeamDialog } from "@/components/add-agent-to-team-dialog"
 
 interface AgentInfo {
   instanceId: string
@@ -297,8 +295,6 @@ export function AppSidebar({
           <TeamCategory
             key={team.id}
             team={team}
-            agents={agents}
-            coFounder={coFounder}
             pathname={pathname}
             unreadCounts={unreadCounts}
           />
@@ -414,14 +410,10 @@ function ChannelItem({
 
 function TeamCategory({
   team,
-  agents,
-  coFounder,
   pathname,
   unreadCounts,
 }: {
   team: TeamInfo
-  agents: AgentInfo[]
-  coFounder: AgentInfo | null
   pathname: string
   unreadCounts: Record<string, number>
 }) {
@@ -429,9 +421,6 @@ function TeamCategory({
 
   // Check if any channel in this team has unread messages
   const teamHasUnread = team.channels.some(ch => (unreadCounts[ch.id] ?? 0) > 0)
-
-  // All agents available to add (including co-founder)
-  const allAgents = coFounder ? [coFounder, ...agents] : agents
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
@@ -445,11 +434,6 @@ function TeamCategory({
             )}
           </CollapsibleTrigger>
         </SidebarGroupLabel>
-        <AddAgentToTeamDialog teamId={team.id} teamName={team.name} agents={allAgents}>
-          <SidebarGroupAction title="Add agent to team">
-            <Plus className="size-4" />
-          </SidebarGroupAction>
-        </AddAgentToTeamDialog>
         <CollapsibleContent>
           <SidebarGroupContent>
             <SidebarMenu>

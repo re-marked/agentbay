@@ -65,7 +65,7 @@ export function ChannelMemberList({ members, teamId, teamName, availableAgents =
         )}
 
         {/* Add Agent button for team channels */}
-        {teamId && teamName && availableAgents.length > 0 && (
+        {teamId && teamName && (
           <div className="mt-2 px-1">
             <AddAgentToTeamDialog
               teamId={teamId}
