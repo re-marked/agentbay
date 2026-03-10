@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { createClient as createBrowserClient } from '@agentbay/db/client'
 import { toast } from 'sonner'
@@ -10,9 +10,11 @@ interface Channel {
   name: string
 }
 
+const POLL_INTERVAL = 3_000 // 3 seconds
+
 /**
- * Subscribe to Realtime INSERTs on broadcast channels.
- * Tracks unread counts per channel and shows toast notifications.
+ * Poll for new messages in broadcast channels.
+ * Tracks unread counts and shows toast notifications.
  * Clears unread when the user navigates to the channel.
  */
 export function useUnreadNotifications(
@@ -23,28 +25,29 @@ export function useUnreadNotifications(
   const pathname = usePathname()
   const supabaseRef = useRef(createBrowserClient())
 
-  // Stabilize channel list — only recreate subscriptions when IDs actually change
+  // Stabilize channel list
   const channelKey = channels.map(c => c.id).sort().join(',')
   const stableChannels = useMemo(() => channels, [channelKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track active channel from pathname
-  const activeChannelId = stableChannels.find(
-    ch => pathname.startsWith(`/workspace/c/${ch.id}`),
-  )?.id ?? null
+  // Track the latest seen message per channel (to detect new ones)
+  const lastSeenRef = useRef<Record<string, string>>({}) // channelId → latest message created_at
+  const initializedRef = useRef(false)
 
-  const activeChannelIdRef = useRef(activeChannelId)
-  activeChannelIdRef.current = activeChannelId
-
-  // Keep refs for values used inside Realtime callbacks (avoids stale closures)
-  const userMemberIdRef = useRef(userMemberId)
-  userMemberIdRef.current = userMemberId
-
+  // Channel name map
   const channelMapRef = useRef<Record<string, string>>({})
   useEffect(() => {
     const map: Record<string, string> = {}
     for (const ch of stableChannels) map[ch.id] = ch.name
     channelMapRef.current = map
   }, [stableChannels])
+
+  // Active channel from pathname
+  const activeChannelId = stableChannels.find(
+    ch => pathname.startsWith(`/workspace/c/${ch.id}`),
+  )?.id ?? null
+
+  const activeChannelIdRef = useRef(activeChannelId)
+  activeChannelIdRef.current = activeChannelId
 
   // Clear unread when navigating to a channel
   useEffect(() => {
@@ -58,76 +61,83 @@ export function useUnreadNotifications(
     }
   }, [activeChannelId])
 
-  // Subscribe to each broadcast channel — deps are stable (channelKey + userMemberId)
-  useEffect(() => {
+  // Poll for new messages
+  const poll = useCallback(async () => {
     if (!stableChannels.length || !userMemberId) return
 
     const supabase = supabaseRef.current
-    const subs: ReturnType<typeof supabase.channel>[] = []
 
     for (const channel of stableChannels) {
-      const sub = supabase
-        .channel(`unread:${channel.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'channel_messages',
-            filter: `channel_id=eq.${channel.id}`,
+      const lastSeen = lastSeenRef.current[channel.id]
+
+      // Build query: get the latest message in this channel
+      let query = supabase
+        .from('channel_messages')
+        .select('id, channel_id, sender_id, content, created_at')
+        .eq('channel_id', channel.id)
+        .neq('sender_id', userMemberId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (lastSeen) {
+        query = query.gt('created_at', lastSeen)
+      }
+
+      const { data } = await query
+
+      if (!data?.length) continue
+
+      const msg = data[0]
+
+      if (!initializedRef.current) {
+        // First poll — just record the latest timestamps, don't notify
+        lastSeenRef.current[channel.id] = msg.created_at
+        continue
+      }
+
+      // New message found
+      lastSeenRef.current[channel.id] = msg.created_at
+
+      // Skip if user is viewing this channel
+      if (channel.id === activeChannelIdRef.current) continue
+
+      // Increment unread
+      setUnreadCounts(prev => ({
+        ...prev,
+        [channel.id]: (prev[channel.id] ?? 0) + 1,
+      }))
+
+      // Show toast
+      const preview = msg.content?.length > 80
+        ? msg.content.slice(0, 80) + '…'
+        : msg.content ?? 'New message'
+
+      toast(`#${channel.name}`, {
+        description: preview,
+        duration: 4000,
+        action: {
+          label: 'View',
+          onClick: () => {
+            window.location.href = `/workspace/c/${channel.id}`
           },
-          (payload) => {
-            const row = payload.new as Record<string, unknown>
-            const senderId = row.sender_id as string
-            const channelId = row.channel_id as string
-
-            // Skip own messages
-            if (senderId === userMemberIdRef.current) return
-
-            // Skip if user is currently viewing this channel
-            if (channelId === activeChannelIdRef.current) return
-
-            // Skip thread replies (only count top-level messages)
-            if (row.parent_id) return
-
-            // Increment unread count
-            setUnreadCounts(prev => ({
-              ...prev,
-              [channelId]: (prev[channelId] ?? 0) + 1,
-            }))
-
-            // Show toast notification
-            const name = channelMapRef.current[channelId] ?? 'channel'
-            const content = (row.content as string) ?? ''
-            const preview = content.length > 80 ? content.slice(0, 80) + '…' : content
-
-            toast(`#${name}`, {
-              description: preview || 'New message',
-              duration: 4000,
-              action: {
-                label: 'View',
-                onClick: () => {
-                  window.location.href = `/workspace/c/${channelId}`
-                },
-              },
-            })
-          },
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            console.log(`[unread] subscribed to #${channel.name}`)
-          } else if (status === 'CHANNEL_ERROR') {
-            console.warn(`[unread] subscription error for #${channel.name}`)
-          }
-        })
-
-      subs.push(sub)
+        },
+      })
     }
 
-    return () => {
-      subs.forEach(sub => supabase.removeChannel(sub))
-    }
-  }, [stableChannels, userMemberId]) // eslint-disable-line react-hooks/exhaustive-deps
+    initializedRef.current = true
+  }, [stableChannels, userMemberId])
+
+  // Start polling
+  useEffect(() => {
+    if (!stableChannels.length || !userMemberId) return
+
+    // Initial poll to seed timestamps
+    poll()
+
+    const interval = setInterval(poll, POLL_INTERVAL)
+    return () => clearInterval(interval)
+  }, [poll, stableChannels, userMemberId])
 
   return { unreadCounts }
 }
