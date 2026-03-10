@@ -88,19 +88,32 @@ case "${1:-}" in
       -H "Content-Type: application/json" \
       -d "$BODY")
 
-    # Announce in #tasks channel
+    # Extract task ID from result
+    TASK_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')")
+
+    # Announce in #tasks channel and store thread_root_id
     TASKS_CHANNEL_ID=$(curl -s "${REST}/channels?project_id=eq.${AGENT_PROJECT_ID}&kind=eq.broadcast&name=eq.tasks&archived=eq.false&select=id&limit=1" \
       -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
 
-    if [ -n "$TASKS_CHANNEL_ID" ]; then
-      TASK_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')")
+    if [ -n "$TASKS_CHANNEL_ID" ] && [ -n "$TASK_ID" ]; then
       ANNOUNCE="📋 New task: **${TITLE}** [${PRIORITY}]"
       if [ -n "$ASSIGN" ]; then
         ANNOUNCE="$ANNOUNCE — assigned"
       fi
-      sb POST "${REST}/channel_messages" \
+
+      # Post announcement and capture the message ID (thread root)
+      MSG_RESULT=$(sb POST "${REST}/channel_messages" \
         -H "Content-Type: application/json" \
-        -d "{\"channel_id\":\"$TASKS_CHANNEL_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$(echo "$ANNOUNCE" | sed 's/"/\\"/g')\",\"message_kind\":\"system\"}" > /dev/null 2>&1 || true
+        -d "{\"channel_id\":\"$TASKS_CHANNEL_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$(echo "$ANNOUNCE" | sed 's/"/\\"/g')\",\"message_kind\":\"system\"}" 2>/dev/null || true)
+
+      MSG_ID=$(echo "$MSG_RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')" 2>/dev/null || true)
+
+      # Store thread_root_id in task metadata + link channel_id
+      if [ -n "$MSG_ID" ]; then
+        sb PATCH "${REST}/tasks?id=eq.${TASK_ID}" \
+          -H "Content-Type: application/json" \
+          -d "{\"channel_id\":\"$TASKS_CHANNEL_ID\",\"metadata\":{\"thread_root_id\":\"$MSG_ID\"}}" > /dev/null 2>&1 || true
+      fi
     fi
 
     echo "$RESULT" | node -e "
@@ -154,12 +167,17 @@ case "${1:-}" in
       fi
     fi
     shift 2
+
+    # Track status for thread notification
+    NEW_STATUS=""
+
     # Build PATCH body
     BODY="{"
     FIRST=true
     while [ $# -gt 0 ]; do
       case "$1" in
         --status)
+          NEW_STATUS="$2"
           [ "$FIRST" = true ] || BODY="$BODY,"
           BODY="$BODY\"status\":\"$2\""
           # Auto-set timestamps
@@ -199,6 +217,42 @@ case "${1:-}" in
         if(t&&t.title){console.log('Updated: '+t.title+' → '+t.status);}
         else{console.log('Updated task.');}
       "
+
+    # Post status change message to task thread (if thread exists)
+    if [ -n "$NEW_STATUS" ]; then
+      TASK_META=$(curl -s "${REST}/tasks?id=eq.${TASK_ID}&select=channel_id,metadata" \
+        -H "$AUTH_H" -H "$KEY_H" 2>/dev/null || true)
+
+      THREAD_ROOT_ID=$(echo "$TASK_META" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const t=Array.isArray(d)?d[0]:d;
+        const m=t&&t.metadata||{};
+        console.log(m.thread_root_id||'');
+      " 2>/dev/null || true)
+
+      CHAN_ID=$(echo "$TASK_META" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const t=Array.isArray(d)?d[0]:d;
+        console.log(t&&t.channel_id||'');
+      " 2>/dev/null || true)
+
+      if [ -n "$THREAD_ROOT_ID" ] && [ -n "$CHAN_ID" ]; then
+        case "$NEW_STATUS" in
+          in_progress) STATUS_MSG="🔄 Task started" ;;
+          completed)   STATUS_MSG="✅ Task completed" ;;
+          failed)      STATUS_MSG="❌ Task failed" ;;
+          cancelled)   STATUS_MSG="🚫 Task cancelled" ;;
+          blocked)     STATUS_MSG="⛔ Task blocked" ;;
+          *)           STATUS_MSG="" ;;
+        esac
+
+        if [ -n "$STATUS_MSG" ]; then
+          sb POST "${REST}/channel_messages" \
+            -H "Content-Type: application/json" \
+            -d "{\"channel_id\":\"$CHAN_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$STATUS_MSG\",\"message_kind\":\"system\",\"parent_id\":\"$THREAD_ROOT_ID\",\"depth\":1}" > /dev/null 2>&1 || true
+        fi
+      fi
+    fi
     ;;
 
   *)
