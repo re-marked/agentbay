@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@agentbay/db/server'
 import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
@@ -61,7 +62,7 @@ async function ensureCorporation(userId: string) {
  * Resolve the active project ID from the cookie, falling back to the first project.
  * Ensures corporation and project exist.
  */
-export async function getActiveProjectId(userId: string) {
+export const getActiveProjectId = cache(async function getActiveProjectId(userId: string) {
   const service = createServiceClient()
 
   // 1. Ensure corporation exists
@@ -138,13 +139,13 @@ export async function getActiveProjectId(userId: string) {
   }
 
   return { corporations, corporationId, projects: userProjects, activeProjectId, userMemberId, coFounderInstanceId }
-}
+})
 
 /**
  * Load agent instances for the user.
  * Queries agent_instances directly by user_id.
  */
-export async function getProjectAgents(userId: string, _activeProjectId: string | null) {
+export const getProjectAgents = cache(async function getProjectAgents(userId: string, _activeProjectId: string | null) {
   const service = createServiceClient()
 
   const { data: instances } = await service
@@ -157,7 +158,7 @@ export async function getProjectAgents(userId: string, _activeProjectId: string 
   if (!instances || instances.length === 0) return []
 
   return instances as unknown as ProjectAgentInstance[]
-}
+})
 
 /**
  * Map raw DB instances to the AgentInfo shape used by components.
