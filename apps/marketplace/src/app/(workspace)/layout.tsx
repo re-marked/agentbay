@@ -14,7 +14,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
   const user = await getUser()
   if (!user) redirect('/login')
 
-  const { corporations, projects, activeProjectId, coFounderInstanceId } =
+  const { corporations, projects, activeProjectId, coFounderInstanceId, userMemberId } =
     await getActiveProjectId(user.id)
 
   // Run queries in parallel
@@ -37,6 +37,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
       <SidebarProvider className="h-svh !min-h-0">
         <AppSidebar
           userEmail={user.email}
+          userMemberId={userMemberId}
           corporationName={corporations[0]?.name}
           coFounder={coFounder}
           agents={agents}
