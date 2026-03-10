@@ -22,6 +22,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { AgentAvatar } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
+import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
 
 interface AgentInfo {
   instanceId: string
@@ -41,6 +42,7 @@ interface BroadcastChannelInfo {
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   userEmail?: string
+  userMemberId?: string | null
   corporationName?: string
   coFounder?: AgentInfo | null
   agents?: AgentInfo[]
@@ -58,6 +60,7 @@ const STATUS_DOT: Record<string, string> = {
 
 export function AppSidebar({
   userEmail,
+  userMemberId = null,
   corporationName,
   coFounder = null,
   agents = [],
@@ -67,6 +70,7 @@ export function AppSidebar({
   ...props
 }: AppSidebarProps) {
   const pathname = usePathname()
+  const { unreadCounts } = useUnreadNotifications(broadcastChannels, userMemberId)
 
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>
@@ -257,12 +261,19 @@ export function AppSidebar({
                 {broadcastChannels.map((ch) => {
                   const chPath = `/workspace/c/${ch.id}`
                   const isActive = pathname.startsWith(chPath)
+                  const hasUnread = (unreadCounts[ch.id] ?? 0) > 0
                   return (
                     <SidebarMenuItem key={ch.id}>
                       <SidebarMenuButton asChild isActive={isActive} className="gap-2.5">
                         <Link href={chPath}>
                           <Hash className="size-4" />
-                          <span className="truncate">{ch.name}</span>
+                          <span className={`truncate ${hasUnread ? 'font-semibold text-sidebar-foreground' : ''}`}>{ch.name}</span>
+                          {hasUnread && (
+                            <span className="ml-auto flex h-2 w-2 shrink-0">
+                              <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-primary opacity-75" />
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                            </span>
+                          )}
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
