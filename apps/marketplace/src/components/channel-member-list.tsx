@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { AgentAvatar } from '@/lib/agents'
-import { Users, ChevronRight } from 'lucide-react'
+import { Users, ChevronRight, UserPlus } from 'lucide-react'
+import { AddAgentToTeamDialog } from '@/components/add-agent-to-team-dialog'
 
 export interface MemberInfo {
   id: string
@@ -16,9 +17,12 @@ export interface MemberInfo {
 
 interface ChannelMemberListProps {
   members: MemberInfo[]
+  teamId?: string
+  teamName?: string
+  availableAgents?: { instanceId: string; name: string; category: string; iconUrl: string | null }[]
 }
 
-export function ChannelMemberList({ members }: ChannelMemberListProps) {
+export function ChannelMemberList({ members, teamId, teamName, availableAgents = [] }: ChannelMemberListProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   const users = members.filter(m => m.type === 'user')
@@ -58,6 +62,22 @@ export function ChannelMemberList({ members }: ChannelMemberListProps) {
         )}
         {users.length > 0 && (
           <MemberSection label="Users" members={users} />
+        )}
+
+        {/* Add Agent button for team channels */}
+        {teamId && teamName && (
+          <div className="mt-2 px-1">
+            <AddAgentToTeamDialog
+              teamId={teamId}
+              teamName={teamName}
+              agents={availableAgents}
+            >
+              <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors">
+                <UserPlus className="size-4 shrink-0" />
+                <span>Add Agent</span>
+              </button>
+            </AddAgentToTeamDialog>
+          </div>
         )}
       </div>
     </div>

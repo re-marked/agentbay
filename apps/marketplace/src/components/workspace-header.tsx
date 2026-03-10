@@ -25,6 +25,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import type { ProjectInfo } from "@/components/workspace-switcher"
+import type { TeamInfo } from "@/components/app-sidebar"
 
 // ── Breadcrumb context ──────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ interface WorkspaceHeaderProps {
   projects: ProjectInfo[]
   activeProjectId: string | null
   broadcastChannels?: BroadcastChannel[]
+  teams?: TeamInfo[]
 }
 
 const PROJECT_COLORS = [
@@ -109,6 +111,7 @@ export function WorkspaceHeader({
   projects,
   activeProjectId,
   broadcastChannels = [],
+  teams = [],
 }: WorkspaceHeaderProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -123,6 +126,12 @@ export function WorkspaceHeader({
   }, [router])
 
   // Navigation items for the page-level dropdown
+  const teamChannelItems = teams.flatMap(team => team.channels.map(ch => ({
+    icon: <Hash className="size-3.5" />,
+    label: ch.name,
+    href: `/workspace/c/${ch.id}`,
+  })))
+
   const navItems = [
     { icon: <Home className="size-3.5" />, label: "Home", href: "/workspace/home" },
     { icon: <ListTodo className="size-3.5" />, label: "Tasks", href: "/workspace/tasks" },
@@ -131,6 +140,7 @@ export function WorkspaceHeader({
       label: ch.name,
       href: `/workspace/c/${ch.id}`,
     })),
+    ...teamChannelItems,
     { type: "separator" as const },
     { icon: <BarChart3 className="size-3.5" />, label: "Usage", href: "/workspace/usage" },
     { icon: <Key className="size-3.5" />, label: "API Keys", href: "/workspace/settings" },

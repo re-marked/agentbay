@@ -4,6 +4,7 @@ import {
   createAgentMember,
   createDMChannel,
   joinBroadcastChannels,
+  joinTeamChannels,
 } from './agent-lifecycle'
 
 const CO_FOUNDER_GREETING = `Hey! I'm your co-founder. I've been here since the moment you created this corporation — and I'm not going anywhere.
@@ -122,8 +123,9 @@ export async function ensureCoFounderHired(
       depth: 0,
     })
 
-  // 9. Join broadcast channels (#general, etc.)
+  // 9. Join broadcast + team channels
   await joinBroadcastChannels(projectId, agentMemberId)
+  await joinTeamChannels(projectId, agentMemberId)
 
   // 10. Fire provisioning task
   await triggerProvision({

@@ -19,9 +19,10 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
     await getActiveProjectId(user.id)
 
   // Run queries in parallel
-  const [instances, broadcastChannels] = await Promise.all([
+  const [instances, broadcastChannels, teams] = await Promise.all([
     getProjectAgents(user.id, activeProjectId),
     activeProjectId ? loadBroadcastChannels(activeProjectId) : [],
+    activeProjectId ? loadTeamsWithChannels(activeProjectId) : [],
   ])
   const allAgents = toAgentInfoList(instances)
 
@@ -43,6 +44,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
           coFounder={coFounder}
           agents={agents}
           broadcastChannels={broadcastChannels}
+          teams={teams}
           projects={projects}
           activeProjectId={activeProjectId}
         />
@@ -53,6 +55,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
               projects={projects}
               activeProjectId={activeProjectId}
               broadcastChannels={broadcastChannels}
+              teams={teams}
             />
             <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
               {children}
@@ -79,5 +82,48 @@ async function loadBroadcastChannels(projectId: string) {
     id: c.id,
     name: c.name,
     description: c.description,
+  }))
+}
+
+async function loadTeamsWithChannels(projectId: string) {
+  const db = createServiceClient()
+
+  // Load active teams with their channels in parallel
+  const [{ data: teams }, { data: teamChannels }] = await Promise.all([
+    db
+      .from('teams')
+      .select('id, name, description, leader_member_id')
+      .eq('project_id', projectId)
+      .neq('status', 'archived')
+      .order('name', { ascending: true }),
+    db
+      .from('channels')
+      .select('id, name, description, team_id')
+      .eq('project_id', projectId)
+      .eq('kind', 'team')
+      .eq('archived', false)
+      .order('name', { ascending: true }),
+  ])
+
+  if (!teams?.length) return []
+
+  // Group channels by team
+  const channelsByTeam = new Map<string, typeof teamChannels>()
+  for (const ch of teamChannels ?? []) {
+    if (!ch.team_id) continue
+    const list = channelsByTeam.get(ch.team_id) ?? []
+    list.push(ch)
+    channelsByTeam.set(ch.team_id, list)
+  }
+
+  return teams.map(t => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    channels: (channelsByTeam.get(t.id) ?? []).map(ch => ({
+      id: ch.id,
+      name: ch.name,
+      description: ch.description,
+    })),
   }))
 }

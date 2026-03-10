@@ -9,6 +9,7 @@ import {
   createAgentMember,
   createDMChannel,
   joinBroadcastChannels,
+  joinTeamChannels,
   archiveAgentMemberByInstanceId,
 } from '@/lib/workspace/agent-lifecycle'
 
@@ -148,6 +149,7 @@ export async function hireAgent({ agentSlug }: HireAgentParams) {
     )
     await createDMChannel(projectId, userMemberId, agentMemberId, agent.name)
     await joinBroadcastChannels(projectId, agentMemberId)
+    await joinTeamChannels(projectId, agentMemberId)
   } catch (e) {
     // Non-fatal — bootstrap will backfill on next page load
     console.error('[hire] workspace member setup failed:', e)

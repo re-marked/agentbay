@@ -3,7 +3,7 @@ import { createServiceClient } from '@agentbay/db/server'
 import { redirect } from 'next/navigation'
 import { ChannelChat } from '@/components/channel-chat'
 import { Hash } from 'lucide-react'
-import { getActiveProjectId } from '@/lib/projects/queries'
+import { getActiveProjectId, getProjectAgents, toAgentInfoList } from '@/lib/projects/queries'
 import { ChannelMemberList, type MemberInfo } from '@/components/channel-member-list'
 import { DebugPageContext } from '@/components/debug/debug-page-context'
 import { SetPageSegment } from '@/components/workspace-header'
@@ -23,7 +23,7 @@ export default async function ChannelPage({
   const [{ data: channel }, projectInfo] = await Promise.all([
     service
       .from('channels')
-      .select('id, project_id, name, kind, description')
+      .select('id, project_id, name, kind, description, team_id, teams(id, name)')
       .eq('id', channelId)
       .single(),
     getActiveProjectId(user.id),
@@ -106,6 +106,24 @@ export default async function ChannelPage({
     category: m.category,
   }))
 
+  // For team channels, load available agents for the "Add Agent" button
+  const teamInfo = (channel as any).teams as { id: string; name: string } | null
+  let availableAgents: { instanceId: string; name: string; category: string; iconUrl: string | null }[] = []
+
+  if (teamInfo && channel.kind === 'team') {
+    const instances = await getProjectAgents(user.id, activeProjectId)
+    const allAgents = toAgentInfoList(instances)
+    // Filter out agents already in the channel
+    const existingInstanceIds = new Set(
+      Object.values(membersMap)
+        .filter(m => m.type === 'agent' && m.instanceId)
+        .map(m => m.instanceId!)
+    )
+    availableAgents = allAgents
+      .filter(a => !existingInstanceIds.has(a.instanceId))
+      .map(a => ({ instanceId: a.instanceId, name: a.name, category: a.category, iconUrl: a.iconUrl }))
+  }
+
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       <SetPageSegment icon={<Hash className="size-3.5" />} label={channel.name} />
@@ -132,7 +150,12 @@ export default async function ChannelPage({
           agentCategory={agentCategory}
           agentIconUrl={agentIconUrl}
         />
-        <ChannelMemberList members={membersList} />
+        <ChannelMemberList
+          members={membersList}
+          teamId={teamInfo?.id}
+          teamName={teamInfo?.name}
+          availableAgents={availableAgents}
+        />
       </div>
     </div>
   )

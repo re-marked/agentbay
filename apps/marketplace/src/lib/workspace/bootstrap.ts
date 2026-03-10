@@ -3,6 +3,7 @@ import {
   createAgentMember,
   createDMChannel,
   joinBroadcastChannels,
+  joinTeamChannels,
 } from './agent-lifecycle'
 
 /**
@@ -188,6 +189,7 @@ export async function ensureWorkspaceBootstrapped(
         const { memberId } = await createAgentMember(projectId, inst.id, agentName, rank)
         await createDMChannel(projectId, userMemberId, memberId, agentName)
         await joinBroadcastChannels(projectId, memberId)
+        await joinTeamChannels(projectId, memberId)
       } catch (e) {
         // Best effort — will retry on next page load
         console.error(`[bootstrap] failed to backfill agent ${inst.id}:`, e)
