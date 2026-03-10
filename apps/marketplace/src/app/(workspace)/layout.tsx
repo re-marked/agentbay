@@ -9,6 +9,7 @@ import { getActiveProjectId, getProjectAgents, toAgentInfoList } from '@/lib/pro
 import { createServiceClient } from '@agentbay/db/server'
 import { DebugProvider } from '@/components/debug/debug-provider'
 import { DebugPanel } from '@/components/debug/debug-panel'
+import { WorkspaceHeader, WorkspaceHeaderProvider } from '@/components/workspace-header'
 
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser()
@@ -46,7 +47,17 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
           activeProjectId={activeProjectId}
         />
         <SidebarInset className="overflow-hidden">
-          {children}
+          <WorkspaceHeaderProvider>
+            <WorkspaceHeader
+              corporationName={corporations[0]?.name}
+              projects={projects}
+              activeProjectId={activeProjectId}
+              broadcastChannels={broadcastChannels}
+            />
+            <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+              {children}
+            </div>
+          </WorkspaceHeaderProvider>
         </SidebarInset>
       </SidebarProvider>
       <DebugPanel />

@@ -3,13 +3,11 @@ import { createServiceClient } from '@agentbay/db/server'
 import { redirect } from 'next/navigation'
 import { ProvisioningWaitScreen } from '@/components/provisioning-wait-screen'
 import { ChannelChat } from '@/components/channel-chat'
-import { Separator } from '@/components/ui/separator'
-import { SidebarTrigger } from '@/components/ui/sidebar'
-import { AgentAvatar } from '@/lib/agents'
-import { AgentProfileCard } from '@/components/agent-profile-card'
 import { getActiveProjectId } from '@/lib/projects/queries'
 import { ChannelMemberList } from '@/components/channel-member-list'
 import { DebugPageContext } from '@/components/debug/debug-page-context'
+import { SetPageSegment } from '@/components/workspace-header'
+import { MessageSquare } from 'lucide-react'
 
 export default async function DirectMessagePage({
   params,
@@ -125,31 +123,7 @@ export default async function DirectMessagePage({
         flyApp: instance.id,
         status: instance.status,
       }} />
-      <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border/40 bg-background px-4 rounded-t-xl">
-        <SidebarTrigger className="-ml-1" />
-        <Separator
-          orientation="vertical"
-          className="mr-1 data-[orientation=vertical]:h-4"
-        />
-        <AgentProfileCard
-          instanceId={instance.id}
-          name={agentName}
-          category={agent.category}
-          status={instance.status}
-          iconUrl={agent.icon_url}
-          side="bottom"
-        >
-          <span className="cursor-pointer">
-            <AgentAvatar
-              name={agentName}
-              category={agent.category}
-              iconUrl={agent.icon_url}
-              size="xs"
-            />
-          </span>
-        </AgentProfileCard>
-        <span className="text-sm font-medium truncate">{agentName}</span>
-      </header>
+      <SetPageSegment icon={<MessageSquare className="size-3.5" />} label={agentName} />
 
       {isNotReady ? (
         <ProvisioningWaitScreen instanceId={instance.id} agentName={agentName} initialStatus={instance.status} />
