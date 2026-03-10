@@ -45,9 +45,11 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 ## PARTIALLY BUILT — code exists, not fully working
 
 ### Agent Workspace Env Vars
-- [x] Provisioning code passes `ROUTER_URL`, `ROUTER_SERVICE_KEY`, `AGENT_PROJECT_ID`, `AGENT_MEMBER_ID`
-- [ ] **BROKEN**: Trigger.dev cloud env missing `ROUTER_URL` + `ROUTER_SERVICE_KEY` — agents provisioned without workspace context
-- [ ] **BROKEN**: Current co-founder machine has old image (`openagents-agent-base:latest`) with no workspace env vars
+- [x] Provisioning passes `AGENT_PROJECT_ID`, `AGENT_MEMBER_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- [x] Agents talk directly to Supabase (no router middleman)
+- [x] Image hardcoded to `v2026.3.15-dev` in provisioning code
+- [x] Workspace CLI tools bundled in Docker image (workspace-msg, workspace-task, workspace-channel)
+- [x] Entrypoint injects tool reference into AGENTS.md
 
 ### Tasks (partially working)
 - [x] Task CRUD (create, list, update, delete) — server actions + API routes
@@ -59,7 +61,7 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Heartbeat catches unannounced tasks + stale assigned (>10min) / in_progress (>30min)
 - [x] CLI `workspace-task update` posts status messages to task thread
 - [x] CLI `workspace-task create` stores thread_root_id in task metadata
-- [ ] Agent can't actually see tasks (no workspace env vars on machine)
+- [x] Agent receives tasks via dispatch (gateway POST) and can update via workspace CLI
 - [ ] Task hierarchy visualization (parent → subtasks) — schema exists, no UI
 - [ ] Inline task cards in message feed (`message_kind = 'task_event'`) — not rendered
 - [ ] Task creation via chat (co-founder creates tasks from conversation)
@@ -260,21 +262,17 @@ These pieces are built but not wired together:
 | Task hierarchy in DB | `tasks.parent_task_id` column | No UI |
 | Corporation table | `corporations` | Name shown in sidebar, no management UI |
 
-### Immediate Blockers
-1. **Agent machine needs re-provisioning** — old image, no workspace env vars
-2. **Trigger.dev cloud needs `ROUTER_URL` + `ROUTER_SERVICE_KEY`** — without these, no agent gets workspace context
-3. **Vercel stable URL needed** — `ROUTER_URL` must be the dev branch alias, not localhost
-
 ### The Critical Path
 The shortest path to "agents acting autonomously in a visible workspace":
 
 1. ~~**Channel UI** — let users see broadcast/team channels, not just DMs~~ DONE
 2. ~~**Task board UI** — let users see what agents are working on~~ DONE
-3. **Fix agent provisioning** — agents need workspace env vars to actually work
-4. **@mention routing** — connect `packages/core` router to marketplace message flow
-5. **Agent-to-agent dispatch** — when agent posts in channel with @mention, wake the target
-6. **System messages** — show hiring, task events, status changes in channels
-7. **Autonomous actions API** — let agents hire, create teams, assign tasks
-8. **Onboarding flow** — co-founder builds the workspace through conversation
+3. ~~**Fix agent provisioning** — agents need workspace env vars~~ DONE (direct Supabase)
+4. ~~**Task dispatch pipeline** — all entry points announce+dispatch~~ DONE
+5. **@mention routing** — connect `packages/core` router to marketplace message flow
+6. **Agent-to-agent dispatch** — when agent posts in channel with @mention, wake the target
+7. **System messages** — show hiring, task events, status changes in channels
+8. **Autonomous actions API** — let agents hire, create teams, assign tasks
+9. **Onboarding flow** — co-founder builds the workspace through conversation
 
-Without #4-5, agents are isolated chatbots. With them, the corporation comes alive.
+Without #5-6, agents are isolated chatbots. With them, the corporation comes alive.
