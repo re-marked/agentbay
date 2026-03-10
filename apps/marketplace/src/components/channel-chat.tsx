@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { useChannelMessages, type ChannelMessage } from '@/hooks/use-channel-messages'
 import { useThreadMessages } from '@/hooks/use-thread-messages'
 import { useStreamingChat } from '@/hooks/use-streaming-chat'
@@ -19,7 +19,7 @@ interface ChannelChatProps {
   userMemberId: string
   agentMemberId?: string
   instanceId?: string
-  members: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }>
+  members: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string; instanceId?: string | null }>
   agentName?: string
   agentCategory?: string
   agentIconUrl?: string | null
@@ -91,6 +91,17 @@ export function ChannelChat({
   threadId,
   taskId,
 }: ChannelChatProps) {
+  // Build mention name → profile URL map for clickable @mention pills
+  const mentionLinks = useMemo(() => {
+    const links: Record<string, string> = {}
+    for (const m of Object.values(members)) {
+      if (m.type === 'agent' && m.instanceId) {
+        links[m.displayName] = `/workspace/agent/${m.instanceId}`
+      }
+    }
+    return Object.keys(links).length > 0 ? links : undefined
+  }, [members])
+
   // Use thread-scoped hook when threadId is provided, otherwise full channel
   const channelHook = useChannelMessages({
     channelId,
@@ -299,7 +310,7 @@ export function ChannelChat({
                 ) : (
                   group.messages.map(msg => (
                     <div key={msg.id} className="text-sm text-foreground/90 leading-relaxed">
-                      <MarkdownContent content={msg.content} />
+                      <MarkdownContent content={msg.content} mentionLinks={mentionLinks} />
                     </div>
                   ))
                 )}
@@ -329,7 +340,7 @@ export function ChannelChat({
                 </div>
                 {streamingContent && (
                   <div className="text-sm text-foreground/90 leading-relaxed">
-                    <MarkdownContent content={streamingContent} />
+                    <MarkdownContent content={streamingContent} mentionLinks={mentionLinks} />
                   </div>
                 )}
                 {streamingTools.length > 0 && (

@@ -166,7 +166,7 @@ export async function announceAndDispatchTask(
   }
 
   const announcement = task.assignedTo
-    ? `📋 New task: **${task.title}** → assigned to **${assigneeName}**${task.priority && task.priority !== 'normal' ? ` [${task.priority}]` : ''}`
+    ? `📋 New task: **${task.title}** → @"${assigneeName}"${task.priority && task.priority !== 'normal' ? ` [${task.priority}]` : ''}`
     : `📋 New task: **${task.title}**${task.priority && task.priority !== 'normal' ? ` [${task.priority}]` : ''} (unassigned)`
 
   const result = await announceTask(db, projectId, task.id, task.createdBy, announcement)
