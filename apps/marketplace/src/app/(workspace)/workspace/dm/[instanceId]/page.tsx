@@ -47,7 +47,7 @@ export default async function DirectMessagePage({
   let channelId: string | null = null
   let userMemberId: string | null = null
   let agentMemberId: string | null = null
-  let membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }> = {}
+  let membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string; instanceId?: string | null }> = {}
 
   if (!isNotReady) {
     const { activeProjectId, userMemberId: uid } = projectInfo
@@ -112,6 +112,7 @@ export default async function DirectMessagePage({
                   type: 'agent',
                   iconUrl: agent.icon_url,
                   category: agent.category,
+                  instanceId,
                 },
               }
             }

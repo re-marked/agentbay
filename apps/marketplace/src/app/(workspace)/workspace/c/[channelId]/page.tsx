@@ -43,7 +43,7 @@ export default async function ChannelPage({
     .select('member_id, members!inner(id, display_name, instance_id)')
     .eq('channel_id', channelId)
 
-  const membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }> = {}
+  const membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string; instanceId?: string | null }> = {}
 
   // Track agent info for streaming props
   let agentInstanceId: string | undefined
@@ -82,6 +82,7 @@ export default async function ChannelPage({
         type: isAgent ? 'agent' : 'user',
         iconUrl: agentInfo?.icon_url ?? null,
         category: agentInfo?.category ?? undefined,
+        instanceId: member.instance_id,
       }
 
       // Capture agent info for streaming

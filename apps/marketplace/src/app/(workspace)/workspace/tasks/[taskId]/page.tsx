@@ -66,7 +66,7 @@ export default async function TaskDetailPage({
   }
 
   // Build members map for the channel chat
-  const membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string }> = {}
+  const membersMap: Record<string, { displayName: string; type: string; iconUrl?: string | null; category?: string; instanceId?: string | null }> = {}
 
   // Add user
   const { data: userMemberRow } = await service
@@ -87,6 +87,7 @@ export default async function TaskDetailPage({
       type: assignee.instance_id ? 'agent' : 'user',
       iconUrl: agentIconUrl,
       category: agentCategory,
+      instanceId: assignee.instance_id,
     }
   }
 
@@ -103,6 +104,7 @@ export default async function TaskDetailPage({
         membersMap[m.id] = {
           displayName: m.display_name ?? 'Unknown',
           type: m.instance_id ? 'agent' : 'user',
+          instanceId: m.instance_id,
         }
       }
     }
