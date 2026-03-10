@@ -5,7 +5,9 @@ import { createServiceClient } from '@agentbay/db'
  * Heartbeat cron — wakes all running agents every 10 minutes.
  *
  * Task-aware behavior:
- * - If an agent has 'assigned' tasks with no recent thread activity, re-dispatch via Trigger.dev
+ * - Catches unannounced tasks (from CLI or failed API calls) and retroactively announces + dispatches
+ * - Re-dispatches stale 'assigned' tasks (>10 min no activity) and 'in_progress' tasks (>30 min)
+ * - Tracks last_dispatched_at in task metadata to prevent rapid re-dispatch
  * - Agents with no pending tasks still get a generic heartbeat for proactive checks
  */
 export const heartbeatAgents = schedules.task({
@@ -37,14 +39,15 @@ export const heartbeatAgents = schedules.task({
 
     const results = await Promise.allSettled(
       instances.map(async (inst) => {
-        // Check if this agent has stale assigned tasks to re-dispatch
+        // Check if this agent has stale or unannounced tasks to dispatch
         const dispatched = await dispatchStaleTasks(db, inst.id)
         if (dispatched > 0) {
-          logger.info(`Re-dispatched ${dispatched} stale task(s) for ${inst.display_name}`, { instanceId: inst.id })
+          logger.info(`Dispatched ${dispatched} task(s) for ${inst.display_name}`, { instanceId: inst.id })
+          // Skip generic heartbeat — task dispatch is the heartbeat
           return { id: inst.id, ok: true, dispatched }
         }
 
-        // No stale tasks — send generic heartbeat
+        // No tasks to dispatch — send generic heartbeat
         const gatewayUrl = `https://${inst.fly_app_name}.fly.dev`
         try {
           const res = await fetch(`${gatewayUrl}/v1/chat/completions`, {
@@ -88,9 +91,18 @@ export const heartbeatAgents = schedules.task({
 })
 
 /**
- * Find assigned/in_progress tasks for this agent instance that have stale threads,
- * and re-dispatch them via Trigger.dev.
- * Returns the number of tasks dispatched.
+ * Safety net: find tasks assigned to this agent that need attention.
+ *
+ * A. Unannounced tasks — no thread_root_id in metadata (from CLI or failed API calls).
+ *    Retroactively announce in #tasks + dispatch.
+ *
+ * B. Stale 'assigned' tasks — have thread but no activity for 10+ minutes.
+ *    Re-dispatch via Trigger.dev.
+ *
+ * C. Stale 'in_progress' tasks — have thread but no activity for 30+ minutes.
+ *    Re-dispatch via Trigger.dev (agent may have crashed/timed out).
+ *
+ * Respects last_dispatched_at to prevent rapid re-dispatch (minimum 10 min gap).
  */
 async function dispatchStaleTasks(
   db: ReturnType<typeof createServiceClient>,
@@ -99,7 +111,7 @@ async function dispatchStaleTasks(
   // Find the agent's member record
   const { data: member } = await db
     .from('members')
-    .select('id')
+    .select('id, project_id')
     .eq('instance_id', instanceId)
     .neq('status', 'archived')
     .limit(1)
@@ -107,36 +119,126 @@ async function dispatchStaleTasks(
 
   if (!member) return 0
 
-  // Find assigned tasks for this member that have a thread_root_id
-  const { data: staleTasks } = await db
+  // Find active tasks for this member (assigned or in_progress)
+  const { data: activeTasks } = await db
     .from('tasks')
-    .select('id, title, description, priority, channel_id, metadata')
+    .select('id, title, description, priority, channel_id, metadata, status, updated_at')
     .eq('assigned_to', member.id)
-    .in('status', ['assigned'])
+    .in('status', ['assigned', 'in_progress'])
 
-  if (!staleTasks?.length) return 0
+  if (!activeTasks?.length) return 0
 
   let dispatched = 0
+  const now = Date.now()
+  const TEN_MINUTES = 10 * 60 * 1000
+  const THIRTY_MINUTES = 30 * 60 * 1000
 
-  for (const task of staleTasks) {
+  for (const task of activeTasks) {
     const metadata = (task.metadata ?? {}) as Record<string, unknown>
     const threadRootId = metadata.thread_root_id as string | undefined
     const channelId = task.channel_id as string | undefined
+    const lastDispatched = metadata.last_dispatched_at as string | undefined
 
-    if (!threadRootId || !channelId) continue
+    // Guard: don't re-dispatch if we dispatched recently (within 10 min)
+    if (lastDispatched) {
+      const elapsed = now - new Date(lastDispatched).getTime()
+      if (elapsed < TEN_MINUTES) continue
+    }
 
-    // Check if there's recent activity in the thread (last 10 minutes)
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    // Case A: Unannounced task — no thread_root_id
+    if (!threadRootId || !channelId) {
+      try {
+        // Find #tasks channel for this project
+        const { data: tasksChannel } = await db
+          .from('channels')
+          .select('id')
+          .eq('project_id', member.project_id)
+          .eq('name', 'tasks')
+          .eq('kind', 'broadcast')
+          .maybeSingle()
+
+        if (!tasksChannel) continue
+
+        // Resolve assignee name
+        const { data: memberData } = await db
+          .from('members')
+          .select('display_name')
+          .eq('id', member.id)
+          .single()
+
+        const assigneeName = memberData?.display_name ?? 'agent'
+        const announcement = `📋 New task: **${task.title}** → assigned to **${assigneeName}**${task.priority !== 'normal' ? ` [${task.priority}]` : ''}`
+
+        // Post announcement
+        const { data: msg } = await db
+          .from('channel_messages')
+          .insert({
+            channel_id: tasksChannel.id,
+            sender_id: member.id,
+            content: announcement,
+            message_kind: 'system',
+            depth: 0,
+          })
+          .select('id')
+          .single()
+
+        if (!msg) continue
+
+        // Store thread_root_id + last_dispatched_at in task metadata
+        await db
+          .from('tasks')
+          .update({
+            channel_id: tasksChannel.id,
+            metadata: { ...metadata, thread_root_id: msg.id, last_dispatched_at: new Date().toISOString() },
+          })
+          .eq('id', task.id)
+
+        // Dispatch to agent
+        await triggerTasks.trigger('dispatch-task-to-agent', {
+          taskId: task.id,
+          instanceId,
+          agentMemberId: member.id,
+          channelId: tasksChannel.id,
+          threadRootId: msg.id,
+          title: task.title,
+          description: task.description,
+          priority: task.priority,
+        })
+
+        dispatched++
+        logger.info('Retroactively announced + dispatched unannounced task', { taskId: task.id })
+      } catch (err) {
+        logger.warn('Failed to announce+dispatch unannounced task', {
+          taskId: task.id,
+          error: String(err),
+        })
+      }
+      continue
+    }
+
+    // Case B & C: Has thread — check for staleness
+    const stalenessThreshold = task.status === 'assigned' ? TEN_MINUTES : THIRTY_MINUTES
+
+    // Check for recent thread activity
+    const cutoff = new Date(now - stalenessThreshold).toISOString()
     const { count } = await db
       .from('channel_messages')
       .select('id', { count: 'exact', head: true })
       .eq('parent_id', threadRootId)
-      .gt('created_at', tenMinutesAgo)
+      .gt('created_at', cutoff)
 
     if (count && count > 0) continue // Recent activity exists, skip
 
-    // Re-dispatch via Trigger.dev
+    // Stale — re-dispatch
     try {
+      // Update last_dispatched_at
+      await db
+        .from('tasks')
+        .update({
+          metadata: { ...metadata, last_dispatched_at: new Date().toISOString() },
+        })
+        .eq('id', task.id)
+
       await triggerTasks.trigger('dispatch-task-to-agent', {
         taskId: task.id,
         instanceId,
@@ -148,6 +250,7 @@ async function dispatchStaleTasks(
         priority: task.priority,
       })
       dispatched++
+      logger.info(`Re-dispatched stale ${task.status} task`, { taskId: task.id, status: task.status })
     } catch (err) {
       logger.warn('Failed to re-dispatch stale task', {
         taskId: task.id,
