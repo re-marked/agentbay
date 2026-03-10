@@ -106,7 +106,7 @@ case "${1:-}" in
     echo "$RESULT" | node -e "
       const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       const t=Array.isArray(d)?d[0]:d;
-      if(t&&t.id){console.log('Created: '+t.title+' ('+t.id.slice(0,8)+')');}
+      if(t&&t.id){console.log('Created: '+t.title+' ('+t.id+')');}
       else{console.log('Created task.');}
     "
     ;;
@@ -130,7 +130,7 @@ case "${1:-}" in
         if(!Array.isArray(d)||!d.length){console.log('No tasks found.');process.exit(0)}
         d.forEach(t=>{
           const pri=t.priority==='urgent'?'‼️':t.priority==='high'?'!!':t.priority==='low'?'..':'  ';
-          console.log(pri+' ['+t.status+'] '+t.title+' ('+t.id.slice(0,8)+')');
+          console.log(pri+' ['+t.status+'] '+t.title+' ('+t.id+')');
           if(t.description) console.log('   '+t.description.slice(0,120));
         });
       "
@@ -141,6 +141,17 @@ case "${1:-}" in
     if [ -z "$TASK_ID" ]; then
       echo "Error: taskId is required"
       exit 1
+    fi
+    # Resolve partial IDs (e.g. 8-char prefix) to full UUID
+    if [ ${#TASK_ID} -lt 36 ]; then
+      FULL_ID=$(curl -s "${REST}/tasks?id=like.${TASK_ID}%25&project_id=eq.${AGENT_PROJECT_ID}&select=id&limit=1" \
+        -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+      if [ -n "$FULL_ID" ]; then
+        TASK_ID="$FULL_ID"
+      else
+        echo "Error: No task found matching prefix '$TASK_ID'"
+        exit 1
+      fi
     fi
     shift 2
     # Build PATCH body
