@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient as createBrowserClient } from '@agentbay/db/client'
 import type { ChannelMessage } from './use-channel-messages'
+import { useDebug } from '@/components/debug/debug-provider'
 
 interface UseThreadMessagesOptions {
   channelId: string
@@ -21,6 +22,7 @@ export function useThreadMessages({
   const [error, setError] = useState<string | null>(null)
   const supabaseRef = useRef(createBrowserClient())
   const loadRef = useRef<(() => void) | undefined>(undefined)
+  const { log } = useDebug()
 
   // Load thread root + all replies
   useEffect(() => {
@@ -37,10 +39,13 @@ export function useThreadMessages({
         .limit(200)
 
       if (fetchErr) {
+        log('error', `Failed to load thread messages: ${fetchErr.message}`, { threadRootId })
         setError(fetchErr.message)
         setIsLoading(false)
         return
       }
+
+      log('message', `Loaded ${(data ?? []).length} thread messages for root ${threadRootId.slice(0, 8)}`)
 
       setMessages(
         (data ?? []).map((row: any) => ({
@@ -88,7 +93,11 @@ export function useThreadMessages({
         (payload: { new: Record<string, unknown> }) => {
           const row = payload.new
           // Only include messages that belong to this thread
-          if (row.parent_id !== threadRootId && row.id !== threadRootId) return
+          if (row.parent_id !== threadRootId && row.id !== threadRootId) {
+            log('realtime', `Filtered out non-thread message ${(row.id as string).slice(0, 8)} (parent_id=${row.parent_id})`)
+            return
+          }
+          log('realtime', `INSERT thread message: ${(row.message_kind as string) ?? 'text'} from ${(row.sender_id as string).slice(0, 8)}`)
 
           const senderId = row.sender_id as string
           const newMsg: ChannelMessage = {
@@ -113,12 +122,14 @@ export function useThreadMessages({
           })
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        log('realtime', `Subscription thread-messages:${threadRootId.slice(0, 8)} → ${status}`)
+      })
 
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [channelId, threadRootId, members])
+  }, [channelId, threadRootId, members, log])
 
   const addOptimisticMessage = useCallback(
     (msg: ChannelMessage) => {

@@ -7,6 +7,8 @@ import {
 } from '@/components/ui/sidebar'
 import { getActiveProjectId, getProjectAgents, toAgentInfoList } from '@/lib/projects/queries'
 import { createServiceClient } from '@agentbay/db/server'
+import { DebugProvider } from '@/components/debug/debug-provider'
+import { DebugPanel } from '@/components/debug/debug-panel'
 
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser()
@@ -31,20 +33,23 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
     : allAgents
 
   return (
-    <SidebarProvider className="h-svh !min-h-0">
-      <AppSidebar
-        userEmail={user.email}
-        corporationName={corporations[0]?.name}
-        coFounder={coFounder}
-        agents={agents}
-        broadcastChannels={broadcastChannels}
-        projects={projects}
-        activeProjectId={activeProjectId}
-      />
-      <SidebarInset className="overflow-hidden">
-        {children}
-      </SidebarInset>
-    </SidebarProvider>
+    <DebugProvider>
+      <SidebarProvider className="h-svh !min-h-0">
+        <AppSidebar
+          userEmail={user.email}
+          corporationName={corporations[0]?.name}
+          coFounder={coFounder}
+          agents={agents}
+          broadcastChannels={broadcastChannels}
+          projects={projects}
+          activeProjectId={activeProjectId}
+        />
+        <SidebarInset className="overflow-hidden">
+          {children}
+        </SidebarInset>
+      </SidebarProvider>
+      <DebugPanel />
+    </DebugProvider>
   )
 }
 

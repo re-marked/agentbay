@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient as createBrowserClient } from '@agentbay/db/client'
+import { useDebug } from '@/components/debug/debug-provider'
 
 export interface ChannelMessage {
   id: string
@@ -33,6 +34,7 @@ export function useChannelMessages({
   const [error, setError] = useState<string | null>(null)
   const supabaseRef = useRef(createBrowserClient())
   const loadRef = useRef<(() => void) | undefined>(undefined)
+  const { log } = useDebug()
 
   // Load history on mount
   useEffect(() => {
@@ -47,10 +49,13 @@ export function useChannelMessages({
         .limit(100)
 
       if (fetchErr) {
+        log('error', `Failed to load channel messages: ${fetchErr.message}`, { channelId })
         setError(fetchErr.message)
         setIsLoading(false)
         return
       }
+
+      log('message', `Loaded ${(data ?? []).length} messages for channel ${channelId.slice(0, 8)}`)
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setMessages(
@@ -98,6 +103,7 @@ export function useChannelMessages({
         },
         (payload: { new: Record<string, unknown> }) => {
           const row = payload.new
+          log('realtime', `INSERT channel_messages: ${(row.message_kind as string) ?? 'text'} from ${(row.sender_id as string).slice(0, 8)}`, { id: row.id, channel_id: row.channel_id })
           const senderId = row.sender_id as string
           const newMsg: ChannelMessage = {
             id: row.id as string,
@@ -122,12 +128,14 @@ export function useChannelMessages({
           })
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        log('realtime', `Subscription channel-messages:${channelId.slice(0, 8)} → ${status}`)
+      })
 
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [channelId, members])
+  }, [channelId, members, log])
 
   // Send message
   const sendMessage = useCallback(
@@ -151,6 +159,7 @@ export function useChannelMessages({
       setMessages(prev => [...prev, optimisticMsg])
 
       try {
+        log('api', `POST /api/v1/messages → channel ${channelId.slice(0, 8)}`)
         const res = await fetch('/api/v1/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -161,7 +170,9 @@ export function useChannelMessages({
           const data = await res.json().catch(() => ({}))
           throw new Error(data.error ?? `HTTP ${res.status}`)
         }
+        log('api', `POST /api/v1/messages → ${res.status} OK`)
       } catch (err) {
+        log('error', `Send message failed: ${err instanceof Error ? err.message : String(err)}`)
         setError(err instanceof Error ? err.message : 'Failed to send message')
         // Remove optimistic message on error
         setMessages(prev => prev.filter(m => m.id !== optimisticId))

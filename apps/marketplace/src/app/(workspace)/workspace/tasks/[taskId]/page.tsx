@@ -7,6 +7,7 @@ import { TaskDetailHeader } from '@/components/tasks/task-detail-header'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
 import { ChannelMemberList } from '@/components/channel-member-list'
+import { DebugPageContext } from '@/components/debug/debug-page-context'
 
 export default async function TaskDetailPage({
   params,
@@ -111,6 +112,17 @@ export default async function TaskDetailPage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+      <DebugPageContext data={{
+        page: 'task',
+        taskId,
+        taskStatus: task.status,
+        taskPriority: task.priority,
+        assignedTo: task.assigned_to,
+        channelId: channelId ?? null,
+        threadRootId: threadRootId ?? null,
+        userMemberId,
+        hasThread: hasThread ? 'true' : 'false',
+      }} />
       <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border/40 bg-background px-4">
         <SidebarTrigger className="-ml-1" />
         <Separator

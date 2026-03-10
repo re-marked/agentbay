@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import type { ToolUse } from '@/components/tool-use-block'
+import { useDebug } from '@/components/debug/debug-provider'
 
 interface StreamDoneResult {
   content: string
@@ -19,6 +20,7 @@ interface UseStreamingChatOptions {
 }
 
 export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStreamingChatOptions) {
+  const { log } = useDebug()
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
   const [streamingContent, setStreamingContent] = useState('')
@@ -42,12 +44,16 @@ export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStr
       abortRef.current = abortController
 
       try {
+        log('stream', `POST /api/v1/messages/stream → channel ${channelId.slice(0, 8)}${threadId ? ` thread ${threadId.slice(0, 8)}` : ''}${taskId ? ` task ${taskId.slice(0, 8)}` : ''}`)
+        const streamStart = Date.now()
         const res = await fetch('/api/v1/messages/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ channelId, content: content.trim(), threadId, taskId }),
           signal: abortController.signal,
         })
+
+        log('stream', `Stream response: ${res.status} (${Date.now() - streamStart}ms)`)
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}))
@@ -90,8 +96,9 @@ export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStr
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
-          // User cancelled — not an error
+          log('stream', 'Stream aborted by user')
         } else {
+          log('error', `Stream failed: ${err instanceof Error ? err.message : String(err)}`)
           setStreamError(err instanceof Error ? err.message : 'Streaming failed')
         }
       } finally {
@@ -108,12 +115,14 @@ export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStr
 
       switch (event) {
         case 'delta':
+          log('stream', `delta: +${(data.content ?? '').length} chars`)
           setStreamingContent(prev => prev + (data.content ?? ''))
           break
 
         case 'tool': {
           const toolId = data.id as string
           const state = data.state as string
+          log('stream', `tool ${state}: ${data.tool ?? toolId}`, state === 'end' ? { output: (data.output ?? '').slice(0, 200) } : undefined)
 
           if (state === 'start') {
             const newTool: ToolUse = {
@@ -152,7 +161,7 @@ export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStr
         }
 
         case 'done':
-          // Notify caller so it can inject optimistic messages before we clear
+          log('stream', `done: ${(data.content ?? '').length} chars, ${toolsRef.current.length} tools`)
           onDoneRef.current?.({ content: data.content ?? '', tools: toolsRef.current })
           setStreamingContent('')
           setStreamingTools([])
@@ -160,6 +169,7 @@ export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStr
           break
 
         case 'error':
+          log('error', `Stream error event: ${data.error ?? 'Unknown'}`, data)
           setStreamError(data.error ?? 'Unknown error')
           break
       }
