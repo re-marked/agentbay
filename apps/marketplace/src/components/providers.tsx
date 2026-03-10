@@ -11,7 +11,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
         theme="dark"
         position="bottom-right"
         toastOptions={{
-          className: 'border-border bg-card text-card-foreground',
+          style: {
+            background: 'hsl(30 3% 13%)',
+            border: '1px solid hsl(30 3% 18%)',
+            color: 'hsl(40 10% 95%)',
+          },
+          actionButtonStyle: {
+            background: 'hsl(215 90% 58%)',
+            color: 'hsl(0 0% 100%)',
+          },
+          descriptionStyle: {
+            color: 'hsl(30 5% 55%)',
+          },
         }}
       />
     </ThemeProvider>
