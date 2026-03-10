@@ -1,30 +1,28 @@
 #!/bin/sh
-# workspace-msg — send and read messages in workspace channels
+# workspace-msg — send and read messages in workspace channels (direct Supabase)
 # Usage:
-#   workspace-msg send <channelId> "message content"
+#   workspace-msg send <channelId> "message content" [--thread <parentMessageId>]
 #   workspace-msg read <channelId> [--limit N]
 #   workspace-msg channels              # list your channels
 #
-# Requires: ROUTER_URL, ROUTER_SERVICE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+# Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
 
 set -e
 
-# ── Preflight: check required env vars ──
+# ── Preflight ──
 missing=""
-[ -z "$ROUTER_URL" ] && missing="$missing ROUTER_URL"
-[ -z "$ROUTER_SERVICE_KEY" ] && missing="$missing ROUTER_SERVICE_KEY"
+[ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+[ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
 [ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
 [ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
 if [ -n "$missing" ]; then
   echo "Error: Missing required env vars:$missing"
-  echo "These are set during provisioning. If missing, the machine was provisioned without workspace context."
   exit 1
 fi
 
-API="${ROUTER_URL}/v1/agent"
-AUTH="Authorization: Bearer ${ROUTER_SERVICE_KEY}"
-MEMBER="X-Agent-Member-Id: ${AGENT_MEMBER_ID}"
-PROJECT="X-Agent-Project-Id: ${AGENT_PROJECT_ID}"
+REST="${SUPABASE_URL}/rest/v1"
+AUTH_H="Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+KEY_H="apikey: ${SUPABASE_SERVICE_ROLE_KEY}"
 
 usage() {
   echo "Usage:"
@@ -34,15 +32,14 @@ usage() {
   exit 1
 }
 
-# Helper: run curl and show errors clearly
-api_call() {
+sb() {
   METHOD="$1"; shift
   URL="$1"; shift
   TMPFILE=$(mktemp)
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
-    -H "$AUTH" -H "$MEMBER" -H "$PROJECT" "$@" 2>&1)
+    -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
   if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
-    echo "Error: HTTP $HTTP_CODE from $URL"
+    echo "Error: HTTP $HTTP_CODE"
     cat "$TMPFILE" 2>/dev/null
     rm -f "$TMPFILE"
     exit 1
@@ -60,7 +57,6 @@ case "${1:-}" in
       echo "Error: workspace-msg send <channelId> \"message\" [--thread <parentMessageId>]"
       exit 1
     fi
-    # Parse optional --thread flag
     shift 3
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -68,50 +64,69 @@ case "${1:-}" in
         *)        shift ;;
       esac
     done
-    BODY="{\"channelId\":\"$CHANNEL_ID\",\"content\":\"$(echo "$CONTENT" | sed 's/"/\\"/g')\""
+
+    BODY="{\"channel_id\":\"$CHANNEL_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$(echo "$CONTENT" | sed 's/"/\\"/g')\",\"message_kind\":\"text\""
     if [ -n "$PARENT_ID" ]; then
-      BODY="$BODY,\"parentId\":\"$PARENT_ID\""
+      BODY="$BODY,\"parent_id\":\"$PARENT_ID\",\"depth\":1"
     fi
     BODY="$BODY}"
-    api_call POST "${API}/messages" \
+
+    sb POST "${REST}/channel_messages" \
       -H "Content-Type: application/json" \
-      -d "$BODY"
-    echo
+      -d "$BODY" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const m=Array.isArray(d)?d[0]:d;
+        if(m&&m.id){console.log('Sent ('+m.id.slice(0,8)+')');}
+        else{console.log('Sent.');}
+      "
     ;;
 
   read)
     CHANNEL_ID="$2"
-    LIMIT="${4:-50}"
+    LIMIT="50"
     if [ -z "$CHANNEL_ID" ]; then
       echo "Error: workspace-msg read <channelId>"
       exit 1
     fi
-    if [ "${3:-}" = "--limit" ] && [ -n "${4:-}" ]; then
-      LIMIT="$4"
-    fi
-    api_call GET "${API}/messages?channelId=${CHANNEL_ID}&limit=${LIMIT}" | \
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --limit) LIMIT="$2"; shift 2 ;;
+        *)       shift ;;
+      esac
+    done
+
+    # Fetch messages with sender info via embedded join
+    sb GET "${REST}/channel_messages?channel_id=eq.${CHANNEL_ID}&deleted_at=is.null&order=created_at.desc&limit=${LIMIT}&select=id,content,sender_id,message_kind,created_at,members!channel_messages_sender_id_fkey(display_name,instance_id)" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        if(d.error){console.log('API Error:',d.error);process.exit(1)}
-        (d.messages||[]).forEach(m=>{
-          const t=new Date(m.createdAt).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
-          const tag=m.senderType==='agent'?'[bot]':'';
-          console.log('['+t+'] '+m.senderName+tag+': '+m.content);
+        if(!Array.isArray(d)||!d.length){console.log('No messages.');process.exit(0)}
+        d.reverse().forEach(m=>{
+          const t=new Date(m.created_at).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+          const name=m.members?.display_name||'Unknown';
+          const tag=m.members?.instance_id?'[bot]':'';
+          if(m.message_kind==='tool_result'){
+            console.log('['+t+'] '+name+tag+': [tool] '+m.content.slice(0,100));
+          } else {
+            console.log('['+t+'] '+name+tag+': '+m.content);
+          }
         });
-        if(!(d.messages||[]).length) console.log('No messages.');
       "
     ;;
 
   channels)
-    api_call GET "${API}/channels" | \
+    # Get channels where this agent is a member
+    sb GET "${REST}/channel_members?member_id=eq.${AGENT_MEMBER_ID}&select=channel_id,channels!inner(id,name,kind,description)" | \
       node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        if(d.error){console.log('API Error:',d.error);process.exit(1)}
-        (d.channels||[]).forEach(c=>{
+        if(!Array.isArray(d)||!d.length){console.log('No channels found.');process.exit(0)}
+        d.forEach(cm=>{
+          const c=cm.channels;
+          if(!c)return;
           const prefix=c.kind==='broadcast'?'#':c.kind==='direct'?'@':'~';
           console.log(c.id+' '+prefix+c.name+' ('+c.kind+')');
         });
-        if(!(d.channels||[]).length) console.log('No channels found.');
       "
     ;;
 

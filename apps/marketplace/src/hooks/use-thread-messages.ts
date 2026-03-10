@@ -27,11 +27,11 @@ export function useThreadMessages({
     const load = async () => {
       const supabase = supabaseRef.current
 
-      // Fetch: root message + all replies in this thread
+      // Fetch: root message + all replies in this thread (parent_id = root)
       const { data, error: fetchErr } = await supabase
         .from('channel_messages')
-        .select('id, channel_id, sender_id, content, message_kind, metadata, created_at, thread_id')
-        .or(`id.eq.${threadRootId},thread_id.eq.${threadRootId}`)
+        .select('id, channel_id, sender_id, content, message_kind, metadata, created_at, parent_id')
+        .or(`id.eq.${threadRootId},parent_id.eq.${threadRootId}`)
         .is('deleted_at', null)
         .order('created_at', { ascending: true })
         .limit(200)
@@ -88,7 +88,7 @@ export function useThreadMessages({
         (payload: { new: Record<string, unknown> }) => {
           const row = payload.new
           // Only include messages that belong to this thread
-          if (row.thread_id !== threadRootId && row.id !== threadRootId) return
+          if (row.parent_id !== threadRootId && row.id !== threadRootId) return
 
           const senderId = row.sender_id as string
           const newMsg: ChannelMessage = {

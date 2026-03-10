@@ -214,11 +214,12 @@ export const provisionAgentMachine = task({
         roleEnv.AGENT_YAML = role.agentYaml
       }
 
-      // Workspace context — all agents get Router API access + identity
+      // Workspace context — all agents get Supabase direct access + identity
       if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
       if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
-      if (process.env.ROUTER_URL) roleEnv.ROUTER_URL = process.env.ROUTER_URL
-      if (process.env.ROUTER_SERVICE_KEY) roleEnv.ROUTER_SERVICE_KEY = process.env.ROUTER_SERVICE_KEY
+      // Agents talk directly to Supabase (no Next.js middleman)
+      if (process.env.NEXT_PUBLIC_SUPABASE_URL) roleEnv.SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+      if (process.env.SUPABASE_SERVICE_ROLE_KEY) roleEnv.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
       // Build OpenClaw config overrides to set the user's preferred model.
       // When only Routeway is configured (no BYOK keys), default to a free tier model.

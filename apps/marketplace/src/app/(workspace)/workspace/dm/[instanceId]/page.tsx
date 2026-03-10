@@ -8,6 +8,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 import { AgentAvatar } from '@/lib/agents'
 import { AgentProfileCard } from '@/components/agent-profile-card'
 import { getActiveProjectId } from '@/lib/projects/queries'
+import { ChannelMemberList } from '@/components/channel-member-list'
 
 export default async function DirectMessagePage({
   params,
@@ -150,18 +151,29 @@ export default async function DirectMessagePage({
       {isNotReady ? (
         <ProvisioningWaitScreen instanceId={instance.id} agentName={agentName} initialStatus={instance.status} />
       ) : channelId && userMemberId ? (
-        <ChannelChat
-          channelId={channelId}
-          userMemberId={userMemberId}
-          agentMemberId={agentMemberId ?? undefined}
-          instanceId={instanceId}
-          members={membersMap}
-          agentName={agentName}
-          agentCategory={agent.category}
-          agentIconUrl={agent.icon_url}
-          placeholder={`Message ${agentName}`}
-          streaming
-        />
+        <div className="flex flex-1 min-h-0">
+          <ChannelChat
+            channelId={channelId}
+            userMemberId={userMemberId}
+            agentMemberId={agentMemberId ?? undefined}
+            instanceId={instanceId}
+            members={membersMap}
+            agentName={agentName}
+            agentCategory={agent.category}
+            agentIconUrl={agent.icon_url}
+            placeholder={`Message ${agentName}`}
+            streaming
+          />
+          <ChannelMemberList
+            members={Object.entries(membersMap).map(([id, m]) => ({
+              id,
+              displayName: m.displayName,
+              type: m.type as 'user' | 'agent',
+              iconUrl: m.iconUrl,
+              category: m.category,
+            }))}
+          />
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-muted-foreground">
