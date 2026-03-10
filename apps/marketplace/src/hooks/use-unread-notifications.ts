@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { createClient as createBrowserClient } from '@agentbay/db/client'
 import { toast } from 'sonner'
 
@@ -21,24 +21,30 @@ export function useUnreadNotifications(
 ) {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const pathname = usePathname()
-  const router = useRouter()
   const supabaseRef = useRef(createBrowserClient())
 
+  // Stabilize channel list — only recreate subscriptions when IDs actually change
+  const channelKey = channels.map(c => c.id).sort().join(',')
+  const stableChannels = useMemo(() => channels, [channelKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Track active channel from pathname
-  const activeChannelId = channels.find(
+  const activeChannelId = stableChannels.find(
     ch => pathname.startsWith(`/workspace/c/${ch.id}`),
   )?.id ?? null
 
   const activeChannelIdRef = useRef(activeChannelId)
   activeChannelIdRef.current = activeChannelId
 
-  // Build channel name map
+  // Keep refs for values used inside Realtime callbacks (avoids stale closures)
+  const userMemberIdRef = useRef(userMemberId)
+  userMemberIdRef.current = userMemberId
+
   const channelMapRef = useRef<Record<string, string>>({})
   useEffect(() => {
     const map: Record<string, string> = {}
-    for (const ch of channels) map[ch.id] = ch.name
+    for (const ch of stableChannels) map[ch.id] = ch.name
     channelMapRef.current = map
-  }, [channels])
+  }, [stableChannels])
 
   // Clear unread when navigating to a channel
   useEffect(() => {
@@ -52,14 +58,14 @@ export function useUnreadNotifications(
     }
   }, [activeChannelId])
 
-  // Subscribe to each broadcast channel
+  // Subscribe to each broadcast channel — deps are stable (channelKey + userMemberId)
   useEffect(() => {
-    if (!channels.length || !userMemberId) return
+    if (!stableChannels.length || !userMemberId) return
 
     const supabase = supabaseRef.current
     const subs: ReturnType<typeof supabase.channel>[] = []
 
-    for (const channel of channels) {
+    for (const channel of stableChannels) {
       const sub = supabase
         .channel(`unread:${channel.id}`)
         .on(
@@ -76,7 +82,7 @@ export function useUnreadNotifications(
             const channelId = row.channel_id as string
 
             // Skip own messages
-            if (senderId === userMemberId) return
+            if (senderId === userMemberIdRef.current) return
 
             // Skip if user is currently viewing this channel
             if (channelId === activeChannelIdRef.current) return
@@ -100,12 +106,20 @@ export function useUnreadNotifications(
               duration: 4000,
               action: {
                 label: 'View',
-                onClick: () => router.push(`/workspace/c/${channelId}`),
+                onClick: () => {
+                  window.location.href = `/workspace/c/${channelId}`
+                },
               },
             })
           },
         )
-        .subscribe()
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`[unread] subscribed to #${channel.name}`)
+          } else if (status === 'CHANNEL_ERROR') {
+            console.warn(`[unread] subscription error for #${channel.name}`)
+          }
+        })
 
       subs.push(sub)
     }
@@ -113,7 +127,7 @@ export function useUnreadNotifications(
     return () => {
       subs.forEach(sub => supabase.removeChannel(sub))
     }
-  }, [channels, userMemberId, router])
+  }, [stableChannels, userMemberId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return { unreadCounts }
 }
