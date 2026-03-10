@@ -7,6 +7,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Hash } from 'lucide-react'
 import { getActiveProjectId } from '@/lib/projects/queries'
 import { ChannelMemberList, type MemberInfo } from '@/components/channel-member-list'
+import { DebugPageContext } from '@/components/debug/debug-page-context'
 
 export default async function ChannelPage({
   params,
@@ -107,6 +108,16 @@ export default async function ChannelPage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+      <DebugPageContext data={{
+        page: 'channel',
+        channelId: channelId,
+        channelName: channel.name,
+        channelKind: channel.kind,
+        userMemberId,
+        agentInstanceId: agentInstanceId ?? null,
+        hasAgent: hasAgent ? 'true' : 'false',
+        memberCount: String(membersList.length),
+      }} />
       <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border/40 bg-background px-4">
         <SidebarTrigger className="-ml-1" />
         <Separator

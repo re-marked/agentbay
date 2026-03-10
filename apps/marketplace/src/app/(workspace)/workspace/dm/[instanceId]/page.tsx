@@ -9,6 +9,7 @@ import { AgentAvatar } from '@/lib/agents'
 import { AgentProfileCard } from '@/components/agent-profile-card'
 import { getActiveProjectId } from '@/lib/projects/queries'
 import { ChannelMemberList } from '@/components/channel-member-list'
+import { DebugPageContext } from '@/components/debug/debug-page-context'
 
 export default async function DirectMessagePage({
   params,
@@ -122,6 +123,15 @@ export default async function DirectMessagePage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+      <DebugPageContext data={{
+        page: 'dm',
+        instanceId,
+        channelId,
+        userMemberId,
+        agentMemberId,
+        flyApp: instance.id,
+        status: instance.status,
+      }} />
       <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border/40 bg-background px-4 rounded-t-xl">
         <SidebarTrigger className="-ml-1" />
         <Separator
