@@ -55,6 +55,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
               projects={projects}
               activeProjectId={activeProjectId}
               broadcastChannels={broadcastChannels}
+              teams={teams}
             />
             <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
               {children}

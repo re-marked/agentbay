@@ -139,6 +139,52 @@ export async function joinBroadcastChannels(
 }
 
 /**
+ * Add an agent member to all active team channels in the project.
+ * Also adds them to the team_members table as a worker.
+ */
+export async function joinTeamChannels(
+  projectId: string,
+  agentMemberId: string
+): Promise<void> {
+  const service = createServiceClient()
+
+  // Find all active team channels in this project
+  const { data: teamChannels } = await service
+    .from('channels')
+    .select('id, team_id')
+    .eq('project_id', projectId)
+    .eq('kind', 'team')
+    .eq('archived', false)
+
+  if (!teamChannels || teamChannels.length === 0) return
+
+  // Add to channel_members
+  const channelRows = teamChannels.map(c => ({
+    channel_id: c.id,
+    member_id: agentMemberId,
+    role: 'participant' as const,
+  }))
+
+  await service
+    .from('channel_members')
+    .upsert(channelRows, { onConflict: 'channel_id,member_id', ignoreDuplicates: true })
+
+  // Add to team_members as worker
+  const teamIds = [...new Set(teamChannels.map(c => c.team_id).filter(Boolean))]
+  if (teamIds.length > 0) {
+    const teamRows = teamIds.map(teamId => ({
+      team_id: teamId!,
+      member_id: agentMemberId,
+      role: 'worker' as const,
+    }))
+
+    await service
+      .from('team_members')
+      .upsert(teamRows, { onConflict: 'team_id,member_id', ignoreDuplicates: true })
+  }
+}
+
+/**
  * Archive an agent member — sets status to archived, archives DM channels,
  * removes from broadcast/team channels.
  * Rejects if the member is the master (co-founder) or owner.
