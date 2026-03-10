@@ -26,6 +26,7 @@ import { AgentAvatar } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
 import { CreateTeamDialog } from "@/components/create-team-dialog"
+import { AddAgentToTeamDialog } from "@/components/add-agent-to-team-dialog"
 
 interface AgentInfo {
   instanceId: string
@@ -295,6 +296,8 @@ export function AppSidebar({
           <TeamCategory
             key={team.id}
             team={team}
+            agents={agents}
+            coFounder={coFounder}
             pathname={pathname}
             unreadCounts={unreadCounts}
           />
@@ -410,10 +413,14 @@ function ChannelItem({
 
 function TeamCategory({
   team,
+  agents,
+  coFounder,
   pathname,
   unreadCounts,
 }: {
   team: TeamInfo
+  agents: AgentInfo[]
+  coFounder: AgentInfo | null
   pathname: string
   unreadCounts: Record<string, number>
 }) {
@@ -422,16 +429,22 @@ function TeamCategory({
   // Check if any channel in this team has unread messages
   const teamHasUnread = team.channels.some(ch => (unreadCounts[ch.id] ?? 0) > 0)
 
+  // All agents available to add (including co-founder)
+  const allAgents = coFounder ? [coFounder, ...agents] : agents
+
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
       <SidebarGroup className="py-0">
         <SidebarGroupLabel asChild>
-          <CollapsibleTrigger className="flex w-full items-center gap-1">
+          <CollapsibleTrigger className="group/team-label flex w-full items-center gap-1">
             <ChevronRight className="size-3 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
             <span className="truncate uppercase tracking-wider">{team.name}</span>
             {teamHasUnread && !open && (
               <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
             )}
+            <span className="ml-auto opacity-0 group-hover/team-label:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+              <AddAgentToTeamDialog teamId={team.id} teamName={team.name} agents={allAgents} />
+            </span>
           </CollapsibleTrigger>
         </SidebarGroupLabel>
         <CollapsibleContent>

@@ -136,3 +136,54 @@ export async function archiveTeam(teamId: string) {
 
   revalidatePath('/workspace', 'layout')
 }
+
+/**
+ * Add an agent (by instance ID) to a team.
+ * Adds to both team_members and all team channels.
+ */
+export async function addAgentToTeam(teamId: string, instanceId: string) {
+  const user = await getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const service = createServiceClient()
+
+  // Resolve agent's member row
+  const { data: member } = await service
+    .from('members')
+    .select('id')
+    .eq('instance_id', instanceId)
+    .neq('status', 'archived')
+    .limit(1)
+    .maybeSingle()
+
+  if (!member) throw new Error('Agent not found')
+
+  // Add to team_members
+  await service
+    .from('team_members')
+    .upsert(
+      { team_id: teamId, member_id: member.id, role: 'worker' },
+      { onConflict: 'team_id,member_id', ignoreDuplicates: true },
+    )
+
+  // Add to all team channels
+  const { data: teamChannels } = await service
+    .from('channels')
+    .select('id')
+    .eq('team_id', teamId)
+    .eq('kind', 'team')
+    .eq('archived', false)
+
+  if (teamChannels && teamChannels.length > 0) {
+    const rows = teamChannels.map(c => ({
+      channel_id: c.id,
+      member_id: member.id,
+      role: 'participant' as const,
+    }))
+    await service
+      .from('channel_members')
+      .upsert(rows, { onConflict: 'channel_id,member_id', ignoreDuplicates: true })
+  }
+
+  revalidatePath('/workspace', 'layout')
+}
