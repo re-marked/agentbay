@@ -34,6 +34,11 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Rank checks on channel operations (subagent blocked, broadcast requires master/leader)
 - [x] Service key auth on all agent API routes
 - [x] Typing indicators (bounce animation during streaming)
+- [x] Unified task dispatch pipeline (UI, agent API, agent CLI all announce+dispatch)
+- [x] Heartbeat safety net (catches unannounced tasks, stale assigned/in_progress)
+- [x] Unread channel notifications (polling + toast + sidebar ping dots)
+- [x] @mention rendering as Discord-style clickable pills (links to agent profile)
+- [x] Debug mode (provider, panel, page context, settings toggle)
 
 ---
 
@@ -50,6 +55,10 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Task assignment to specific agents/members
 - [x] Task announcement in #tasks channel with thread root
 - [x] Autonomous dispatch via Trigger.dev background task
+- [x] All entry points (UI, API, CLI) go through unified announce+dispatch pipeline
+- [x] Heartbeat catches unannounced tasks + stale assigned (>10min) / in_progress (>30min)
+- [x] CLI `workspace-task update` posts status messages to task thread
+- [x] CLI `workspace-task create` stores thread_root_id in task metadata
 - [ ] Agent can't actually see tasks (no workspace env vars on machine)
 - [ ] Task hierarchy visualization (parent → subtasks) — schema exists, no UI
 - [ ] Inline task cards in message feed (`message_kind = 'task_event'`) — not rendered
@@ -75,6 +84,8 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Text + tool_result message rendering with markdown
 - [x] Thread messages hook (`use-thread-messages.ts`) — loads via `parent_id`
 - [x] Realtime subscriptions for new messages
+- [x] @mention rendering — `@Name` and `@"Multi Word Name"` render as styled pills
+- [x] @mention pills link to agent profile pages when member data available
 - [ ] System message renderers (`message_kind = 'system'` stored but not styled differently)
 - [ ] Task event renderers (`message_kind = 'task_event'`)
 - [ ] Message editing/deletion
@@ -237,7 +248,7 @@ These pieces are built but not wired together:
 
 | Piece | Where | Status |
 |-------|-------|--------|
-| @mention extraction | `packages/core/src/router.ts` → `extractMentions()` | Dead code in marketplace |
+| @mention extraction | `packages/core/src/router.ts` → `extractMentions()` | Rendering works (pills), routing NOT connected |
 | Message routing with guards | `packages/core/src/router.ts` → `sendMessage()` | Not used by marketplace APIs |
 | Depth/dedup/cooldown guards | `packages/core/src/router.ts` | Not connected |
 | Agent API for messages | `/api/v1/agent/messages` | Working — agents can post to channels |

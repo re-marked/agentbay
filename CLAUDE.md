@@ -169,6 +169,8 @@ The provisioning task passes API keys as env vars. The Docker entrypoint convert
 | `destroy-agent-machine.ts` | `destroy-agent-machine` | Manual |
 | `health-check-machines.ts` | `health-check-machines` | Cron every 5 min |
 | `shutdown-idle-machines.ts` | `shutdown-idle-machines` | Cron every hour |
+| `heartbeat-agents.ts` | `heartbeat-agents` | Cron every 10 min |
+| `dispatch-task-to-agent.ts` | `dispatch-task-to-agent` | Manual (triggered by task dispatch) |
 
 ## Operational Tasks
 
