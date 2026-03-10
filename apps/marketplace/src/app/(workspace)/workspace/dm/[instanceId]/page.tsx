@@ -54,7 +54,7 @@ export default async function DirectMessagePage({
     userMemberId = uid
 
     if (activeProjectId && userMemberId) {
-      // Find agent's member in this project
+      // Find agent member (required before channel lookup)
       const { data: agentMember } = await service
         .from('members')
         .select('id, display_name')
@@ -67,15 +67,15 @@ export default async function DirectMessagePage({
       if (agentMember) {
         agentMemberId = agentMember.id
 
-        // Find DM channel where BOTH user and agent are members
-        // Get channels for both members in parallel
-        const [{ data: userChannels }, { data: agentChannels }] = await Promise.all([
+        // Find DM channel + user display name in parallel
+        // For the DM channel: get channel memberships for both users at once
+        const [{ data: userChannels }, { data: agentChannels }, { data: userMemberRow }] = await Promise.all([
           service.from('channel_members').select('channel_id').eq('member_id', userMemberId),
           service.from('channel_members').select('channel_id').eq('member_id', agentMember.id),
+          service.from('members').select('id, display_name').eq('id', userMemberId).single(),
         ])
 
         if (userChannels && agentChannels) {
-          // Intersect — only channels where BOTH are members
           const agentChannelIds = new Set(agentChannels.map(c => c.channel_id))
           const sharedChannelIds = userChannels
             .map(c => c.channel_id)
@@ -94,14 +94,6 @@ export default async function DirectMessagePage({
 
             if (dmChannel) {
               channelId = dmChannel.id
-
-              // Build members map for the hook
-              const { data: userMemberRow } = await service
-                .from('members')
-                .select('id, display_name')
-                .eq('id', userMemberId)
-                .single()
-
               membersMap = {
                 [userMemberId]: {
                   displayName: userMemberRow?.display_name ?? 'You',

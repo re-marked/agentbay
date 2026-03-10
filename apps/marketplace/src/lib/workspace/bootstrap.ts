@@ -21,15 +21,31 @@ export async function ensureWorkspaceBootstrapped(
 ): Promise<{ userMemberId: string }> {
   const service = createServiceClient()
 
-  // 1. Create or find user member (rank=owner)
-  let userMemberId: string
-
+  // Fast path: if user member already exists, check if channels + agents are set up
+  // This avoids 10+ queries on every page load after the first bootstrap
   const { data: existingMember } = await service
     .from('members')
     .select('id')
     .eq('project_id', projectId)
     .eq('user_id', userId)
     .maybeSingle()
+
+  if (existingMember) {
+    // Quick check: do broadcast channels exist? (covers 99% of page loads after first bootstrap)
+    const { count: channelCount } = await service
+      .from('channels')
+      .select('id', { count: 'exact', head: true })
+      .eq('project_id', projectId)
+      .eq('kind', 'broadcast')
+      .in('name', ['general', 'tasks'])
+
+    if ((channelCount ?? 0) >= 2) {
+      return { userMemberId: existingMember.id }
+    }
+  }
+
+  // Slow path: full bootstrap
+  let userMemberId: string
 
   if (existingMember) {
     userMemberId = existingMember.id
