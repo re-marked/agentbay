@@ -15,13 +15,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
             background: 'hsl(30 3% 13%)',
             border: '1px solid hsl(30 3% 18%)',
             color: 'hsl(40 10% 95%)',
-          },
+            '--normal-text': 'hsl(30 5% 55%)',
+          } as React.CSSProperties,
           actionButtonStyle: {
             background: 'hsl(215 90% 58%)',
             color: 'hsl(0 0% 100%)',
-          },
-          descriptionStyle: {
-            color: 'hsl(30 5% 55%)',
           },
         }}
       />

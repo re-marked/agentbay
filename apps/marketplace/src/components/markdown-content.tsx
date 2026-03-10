@@ -1,5 +1,6 @@
 'use client'
 
+import * as React from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
@@ -7,6 +8,53 @@ import type { Components } from 'react-markdown'
 interface MarkdownContentProps {
   content: string
   className?: string
+}
+
+// ── @mention rendering ──────────────────────────────────────────────
+const MENTION_RE = /@"([^"]+)"|@(\S+)/g
+
+/** Split a text string into segments, wrapping @mentions in styled spans. */
+function renderMentions(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+
+  MENTION_RE.lastIndex = 0
+  while ((m = MENTION_RE.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    const name = m[1] ?? m[2]
+    parts.push(
+      <span
+        key={m.index}
+        className="inline rounded bg-primary/15 px-1 py-0.5 text-primary font-medium hover:bg-primary/25 transition-colors"
+      >
+        @{name}
+      </span>,
+    )
+    last = m.index + m[0].length
+  }
+
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
+/** Recursively walk React children, replacing string segments that contain @mentions. */
+function processMentions(children: React.ReactNode): React.ReactNode {
+  return React.Children.map(children, (child) => {
+    if (typeof child === 'string') {
+      if (!child.includes('@')) return child
+      const parts = renderMentions(child)
+      return parts.length === 1 ? parts[0] : <>{parts}</>
+    }
+    if (React.isValidElement(child) && (child.props as Record<string, unknown>).children) {
+      return React.cloneElement(
+        child,
+        {},
+        processMentions((child.props as Record<string, unknown>).children as React.ReactNode),
+      )
+    }
+    return child
+  })
 }
 
 const components: Components = {
@@ -23,14 +71,14 @@ const components: Components = {
 
   // Paragraphs
   p: ({ children }) => (
-    <p className="mb-1 last:mb-0 leading-relaxed">{children}</p>
+    <p className="mb-1 last:mb-0 leading-relaxed">{processMentions(children)}</p>
   ),
 
   // Inline
   strong: ({ children }) => (
-    <strong className="font-semibold text-foreground">{children}</strong>
+    <strong className="font-semibold text-foreground">{processMentions(children)}</strong>
   ),
-  em: ({ children }) => <em className="italic">{children}</em>,
+  em: ({ children }) => <em className="italic">{processMentions(children)}</em>,
   del: ({ children }) => (
     <del className="line-through text-muted-foreground">{children}</del>
   ),
@@ -64,7 +112,7 @@ const components: Components = {
   ol: ({ children }) => (
     <ol className="list-decimal pl-6 mb-1 space-y-0.5">{children}</ol>
   ),
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  li: ({ children }) => <li className="leading-relaxed">{processMentions(children)}</li>,
 
   // Blockquote
   blockquote: ({ children }) => (
