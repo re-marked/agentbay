@@ -3,6 +3,7 @@ import { createServiceClient } from '@agentbay/db'
 import { FlyClient } from '@agentbay/fly'
 import { AGENT_ROLES } from './agent-roles'
 import { PERSONAL_AI_ROLE } from './personal-ai-role'
+import { generateTeamLeaderRole } from './team-leader-role'
 
 // Hardcoded — do NOT use env var, Trigger.dev cloud env gets stale.
 // Bump this when you push a new image. Never use :latest (Fly doesn't pull fresh).
@@ -18,6 +19,10 @@ export interface ProvisionPayload {
   projectId?: string    // Workspace context
   memberId?: string     // Agent's member ID
   isCoFounder?: boolean // Triggers Personal AI role
+  isTeamLeader?: boolean // Triggers team leader role
+  teamId?: string       // Team UUID (for app naming)
+  teamName?: string     // Team name (for identity)
+  teamDescription?: string | null // Team purpose (for WHOAMI.md)
 }
 
 /**
@@ -92,7 +97,7 @@ export const provisionAgentMachine = task({
   },
 
   run: async (payload: ProvisionPayload) => {
-    const { userId, agentId, instanceId, role: roleId, isCoFounder, projectId, memberId } = payload
+    const { userId, agentId, instanceId, role: roleId, isCoFounder, isTeamLeader, teamId, teamName, teamDescription, projectId, memberId } = payload
     const db = createServiceClient()
     const fly = new FlyClient()
 
@@ -150,12 +155,14 @@ export const provisionAgentMachine = task({
       }
 
       const image = agent.docker_image ?? BASE_IMAGE
-      // Co-founder gets special name, sub-agents by role, master agents by slug
+      // Co-founder gets special name, team leaders by team ID, sub-agents by role, master agents by slug
       const appName = isCoFounder
         ? `ab-cofounder-${userId.slice(0, 8)}`
-        : role
-          ? `ab-${role.id}-${userId.slice(0, 8)}`
-          : `ab-${agent.slug}-${userId.slice(0, 8)}`
+        : isTeamLeader && teamId
+          ? `ab-tl-${teamId.slice(0, 8)}`
+          : role
+            ? `ab-${role.id}-${userId.slice(0, 8)}`
+            : `ab-${agent.slug}-${userId.slice(0, 8)}`
       const gatewayToken = crypto.randomUUID()
 
       logger.info('Provisioning agent machine', { appName, userId, agentId })
@@ -203,12 +210,22 @@ export const provisionAgentMachine = task({
       logger.info('Volume created', { volumeId: volume.id })
 
       // ── 5. Create machine ─────────────────────────────────────────────────
+      // Generate team leader role once (used for both env vars and config overrides)
+      const teamLeaderRole = isTeamLeader && teamName
+        ? generateTeamLeaderRole(teamName, teamDescription ?? null)
+        : null
+
       const roleEnv: Record<string, string> = {}
       if (isCoFounder) {
         roleEnv.AGENT_SOUL_MD = PERSONAL_AI_ROLE.soul
         roleEnv.AGENT_WHOAMI_MD = PERSONAL_AI_ROLE.whoami
         roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
         roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
+      } else if (teamLeaderRole) {
+        roleEnv.AGENT_SOUL_MD = teamLeaderRole.soul
+        roleEnv.AGENT_WHOAMI_MD = teamLeaderRole.whoami
+        roleEnv.AGENT_WHEREAMI_MD = teamLeaderRole.whereami
+        roleEnv.AGENT_YAML = teamLeaderRole.agentYaml
       } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
@@ -235,7 +252,9 @@ export const provisionAgentMachine = task({
       // Model overrides take precedence — prevents roles from hardcoding stale models.
       const roleOcOverrides = (isCoFounder
         ? PERSONAL_AI_ROLE.openclawOverrides
-        : role?.openclawOverrides ?? {}) as Record<string, unknown>
+        : teamLeaderRole
+          ? teamLeaderRole.openclawOverrides
+          : role?.openclawOverrides ?? {}) as Record<string, unknown>
       const finalOverrides = deepMerge(roleOcOverrides, modelOverrides as unknown as Record<string, unknown>)
 
       const machine = await fly.createMachine(appName, {
