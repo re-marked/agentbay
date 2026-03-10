@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Home, Settings, Plus, BarChart3, Key, Sparkles, CompassIcon, Hash, ListTodo } from "lucide-react"
+import { useState } from "react"
+import { Home, Settings, Plus, BarChart3, Key, Sparkles, CompassIcon, Hash, ListTodo, ChevronRight, Users } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -19,10 +20,12 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { AgentAvatar } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
+import { CreateTeamDialog } from "@/components/create-team-dialog"
 
 interface AgentInfo {
   instanceId: string
@@ -40,6 +43,13 @@ interface BroadcastChannelInfo {
   description: string | null
 }
 
+export interface TeamInfo {
+  id: string
+  name: string
+  description: string | null
+  channels: BroadcastChannelInfo[]
+}
+
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   userEmail?: string
   userMemberId?: string | null
@@ -47,6 +57,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   coFounder?: AgentInfo | null
   agents?: AgentInfo[]
   broadcastChannels?: BroadcastChannelInfo[]
+  teams?: TeamInfo[]
   projects?: ProjectInfo[]
   activeProjectId?: string | null
 }
@@ -65,12 +76,20 @@ export function AppSidebar({
   coFounder = null,
   agents = [],
   broadcastChannels = [],
+  teams = [],
   projects = [],
   activeProjectId = null,
   ...props
 }: AppSidebarProps) {
   const pathname = usePathname()
-  const { unreadCounts } = useUnreadNotifications(broadcastChannels, userMemberId)
+
+  // Collect all channels for unread tracking (broadcast + team)
+  const allChannels = React.useMemo(() => {
+    const teamChannels = teams.flatMap(t => t.channels)
+    return [...broadcastChannels, ...teamChannels]
+  }, [broadcastChannels, teams])
+
+  const { unreadCounts } = useUnreadNotifications(allChannels, userMemberId)
 
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>
@@ -258,32 +277,44 @@ export function AppSidebar({
             <SidebarGroupLabel>Channels</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {broadcastChannels.map((ch) => {
-                  const chPath = `/workspace/c/${ch.id}`
-                  const isActive = pathname.startsWith(chPath)
-                  const hasUnread = (unreadCounts[ch.id] ?? 0) > 0
-                  return (
-                    <SidebarMenuItem key={ch.id}>
-                      <SidebarMenuButton asChild isActive={isActive} className="gap-2.5">
-                        <Link href={chPath}>
-                          <Hash className="size-4" />
-                          <span className={`truncate ${hasUnread ? 'font-semibold text-sidebar-foreground' : ''}`}>{ch.name}</span>
-                          {hasUnread && (
-                            <span className="ml-auto flex h-2 w-2 shrink-0">
-                              <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-primary opacity-75" />
-                              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                            </span>
-                          )}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                })}
+                {broadcastChannels.map((ch) => (
+                  <ChannelItem
+                    key={ch.id}
+                    channel={ch}
+                    pathname={pathname}
+                    unreadCount={unreadCounts[ch.id] ?? 0}
+                  />
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         )}
 
+        {/* Team categories — Discord-style collapsible groups */}
+        {teams.map((team) => (
+          <TeamCategory
+            key={team.id}
+            team={team}
+            pathname={pathname}
+            unreadCounts={unreadCounts}
+          />
+        ))}
+
+        {/* Create Team button (shown after teams or after channels) */}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <CreateTeamDialog>
+                  <SidebarMenuButton className="text-muted-foreground gap-2.5">
+                    <Users className="size-4" />
+                    <span>Create Team</span>
+                  </SidebarMenuButton>
+                </CreateTeamDialog>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
         {/* Account */}
         <SidebarGroup>
@@ -337,5 +368,94 @@ export function AppSidebar({
       <SidebarRail />
 
     </Sidebar>
+  )
+}
+
+// ── Channel item (shared between broadcast + team sections) ──────────
+
+function ChannelItem({
+  channel,
+  pathname,
+  unreadCount,
+}: {
+  channel: BroadcastChannelInfo
+  pathname: string
+  unreadCount: number
+}) {
+  const chPath = `/workspace/c/${channel.id}`
+  const isActive = pathname.startsWith(chPath)
+  const hasUnread = unreadCount > 0
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={isActive} className="gap-2.5">
+        <Link href={chPath}>
+          <Hash className="size-4" />
+          <span className={`truncate ${hasUnread ? 'font-semibold text-sidebar-foreground' : ''}`}>
+            {channel.name}
+          </span>
+          {hasUnread && (
+            <span className="ml-auto flex h-2 w-2 shrink-0">
+              <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+            </span>
+          )}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
+}
+
+// ── Team category — Discord-style collapsible group ──────────────────
+
+function TeamCategory({
+  team,
+  pathname,
+  unreadCounts,
+}: {
+  team: TeamInfo
+  pathname: string
+  unreadCounts: Record<string, number>
+}) {
+  const [open, setOpen] = useState(true)
+
+  // Check if any channel in this team has unread messages
+  const teamHasUnread = team.channels.some(ch => (unreadCounts[ch.id] ?? 0) > 0)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
+      <SidebarGroup className="py-0">
+        <SidebarGroupLabel asChild>
+          <CollapsibleTrigger className="flex w-full items-center gap-1">
+            <ChevronRight className="size-3 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+            <span className="truncate uppercase tracking-wider">{team.name}</span>
+            {teamHasUnread && !open && (
+              <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+            )}
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+        <CollapsibleContent>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {team.channels.map((ch) => (
+                <ChannelItem
+                  key={ch.id}
+                  channel={ch}
+                  pathname={pathname}
+                  unreadCount={unreadCounts[ch.id] ?? 0}
+                />
+              ))}
+              {team.channels.length === 0 && (
+                <SidebarMenuItem>
+                  <span className="px-2 py-1 text-xs text-muted-foreground/50">
+                    No channels
+                  </span>
+                </SidebarMenuItem>
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
   )
 }
