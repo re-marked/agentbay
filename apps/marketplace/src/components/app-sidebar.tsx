@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { useState } from "react"
-import { Home, Settings, Plus, BarChart3, Key, Sparkles, CompassIcon, Hash, ListTodo, ChevronRight, Users } from "lucide-react"
+import { Home, Settings, Plus, BarChart3, Key, Sparkles, CompassIcon, Hash, ListTodo, ChevronRight, Users, MoreHorizontal, Trash2 } from "lucide-react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import { WorkspaceSwitcher, type ProjectInfo } from "@/components/workspace-switcher"
 import {
@@ -16,16 +16,25 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { AgentAvatar } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
 import { CreateTeamDialog } from "@/components/create-team-dialog"
+import { archiveChannel } from "@/lib/workspace/channel-actions"
+import { archiveTeam } from "@/lib/workspace/team-actions"
 
 interface AgentInfo {
   instanceId: string
@@ -377,14 +386,17 @@ function ChannelItem({
   channel,
   pathname,
   unreadCount,
+  isTeamChannel = false,
 }: {
   channel: BroadcastChannelInfo
   pathname: string
   unreadCount: number
+  isTeamChannel?: boolean
 }) {
   const chPath = `/workspace/c/${channel.id}`
   const isActive = pathname.startsWith(chPath)
   const hasUnread = unreadCount > 0
+  const router = useRouter()
 
   return (
     <SidebarMenuItem>
@@ -402,6 +414,30 @@ function ChannelItem({
           )}
         </Link>
       </SidebarMenuButton>
+      {!isTeamChannel && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuAction showOnHover>
+              <MoreHorizontal />
+            </SidebarMenuAction>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="start">
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                if (confirm(`Delete #${channel.name}? This cannot be undone.`)) {
+                  archiveChannel(channel.id).then(() => {
+                    if (pathname.startsWith(chPath)) router.push('/workspace/home')
+                  })
+                }
+              }}
+            >
+              <Trash2 className="size-4" />
+              Delete Channel
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </SidebarMenuItem>
   )
 }
@@ -418,13 +454,17 @@ function TeamCategory({
   unreadCounts: Record<string, number>
 }) {
   const [open, setOpen] = useState(true)
+  const router = useRouter()
 
   // Check if any channel in this team has unread messages
   const teamHasUnread = team.channels.some(ch => (unreadCounts[ch.id] ?? 0) > 0)
 
+  // Check if user is currently viewing a page belonging to this team
+  const isViewingTeam = team.channels.some(ch => pathname.startsWith(`/workspace/c/${ch.id}`))
+
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
-      <SidebarGroup className="py-0">
+      <SidebarGroup className="group/team-group relative py-0">
         <SidebarGroupLabel asChild>
           <CollapsibleTrigger className="flex w-full items-center gap-1">
             <ChevronRight className="size-3 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
@@ -434,6 +474,29 @@ function TeamCategory({
             )}
           </CollapsibleTrigger>
         </SidebarGroupLabel>
+        {/* Team actions dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="text-sidebar-foreground/50 hover:text-sidebar-foreground absolute top-1 right-1 flex size-5 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/team-group:opacity-100 data-[state=open]:opacity-100">
+              <MoreHorizontal className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="start">
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                if (confirm(`Delete team "${team.name}"? This will archive the team, its channels, and destroy the team leader agent.`)) {
+                  archiveTeam(team.id).then(() => {
+                    if (isViewingTeam) router.push('/workspace/home')
+                  })
+                }
+              }}
+            >
+              <Trash2 className="size-4" />
+              Delete Team
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <CollapsibleContent>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -443,6 +506,7 @@ function TeamCategory({
                   channel={ch}
                   pathname={pathname}
                   unreadCount={unreadCounts[ch.id] ?? 0}
+                  isTeamChannel
                 />
               ))}
               {team.channels.length === 0 && (

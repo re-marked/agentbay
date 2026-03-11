@@ -92,7 +92,7 @@ async function loadTeamsWithChannels(projectId: string) {
   const [{ data: teams }, { data: teamChannels }] = await Promise.all([
     db
       .from('teams')
-      .select('id, name, description, leader_member_id')
+      .select('id, name, description')
       .eq('project_id', projectId)
       .neq('status', 'archived')
       .order('name', { ascending: true }),
