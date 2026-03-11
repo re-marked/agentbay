@@ -129,17 +129,17 @@ shadcn components auto-derive from these variables. Never hardcode values — ch
 
 ## Database
 
-Schema in Supabase. Two systems coexist during migration:
+Schema in Supabase. V1 chat code was deleted — workspace v2 is the only messaging path.
 
-**Legacy (v1 — powers current UI):**
+**Legacy (v1 — tables exist, no code reads/writes them):**
 
 | Table | Purpose |
 |-------|---------|
-| `agent_instances` | User ↔ Agent pair + Fly.io machine info |
-| `sessions` | Chat sessions |
-| `messages` | Message history |
+| `agent_instances` | User ↔ Agent pair + Fly.io machine info (still active) |
+| `sessions` | Chat sessions (dead) |
+| `messages` | Message history (dead) |
 
-**Workspace (v2 — being built):**
+**Workspace (v2 — the active system):**
 
 | Table | Purpose |
 |-------|---------|
@@ -151,6 +151,13 @@ Schema in Supabase. Two systems coexist during migration:
 
 RLS is enabled on all tables. Service role (used by Trigger.dev) bypasses RLS.
 
+## Notifications
+
+Realtime Broadcast (not `postgres_changes`) for instant message notifications:
+- **Server**: Stream route publishes to `project:{projectId}:messages` channel after persisting agent messages
+- **Client**: `useUnreadNotifications` hook subscribes to Realtime Broadcast + 30s fallback poll
+- **Why not postgres_changes**: Service role inserts don't reliably trigger Realtime events for user subscriptions (RLS filtering issue)
+
 ## OpenClaw API Key Storage
 
 **CRITICAL**: OpenClaw reads API keys from `auth-profiles.json`, NOT env vars:
@@ -160,6 +167,14 @@ RLS is enabled on all tables. Service role (used by Trigger.dev) bypasses RLS.
 ```
 
 The provisioning task passes API keys as env vars. The Docker entrypoint converts them to `auth-profiles.json`. Missing file = silent failure.
+
+## Docker Entrypoint (First Boot vs Every Boot)
+
+The entrypoint (`docker/agent-base/entrypoint.sh`) splits work:
+- **First boot only** (guarded by `/data/.initialized`): seed openclaw.json, apply overrides, register Routeway provider, configure model fallbacks, seed workspace files, write identity (SOUL.md, WHOAMI.md, etc.)
+- **Every boot**: refresh auth-profiles.json (keys may rotate), seed new workspace defaults (won't overwrite existing), clear stale sessions, validate config
+
+This means restarting an agent (Fly machine reboot) preserves its config and identity. Only fresh provisioning triggers full setup.
 
 ## Trigger.dev Tasks
 

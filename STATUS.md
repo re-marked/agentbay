@@ -21,7 +21,7 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Creator platform (publish, analytics, earnings)
 - [x] Workspace bootstrap (corp creation, co-founder auto-hire, DM channel, #general, #tasks)
 - [x] System agents on discover page (Co-Founder + Team Leader in separate "System" category)
-- [x] Supabase Realtime for message updates
+- [x] Supabase Realtime Broadcast for message notifications (replaced 3s polling)
 - [x] Stable session keys (agent remembers conversation context)
 - [x] Broadcast channel pages with streaming chat (`/workspace/c/[channelId]`)
 - [x] Channel list in sidebar (broadcast channels with Hash icons)
@@ -37,7 +37,7 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Typing indicators (bounce animation during streaming)
 - [x] Unified task dispatch pipeline (UI, agent API, agent CLI all announce+dispatch)
 - [x] Heartbeat safety net (catches unannounced tasks, stale assigned/in_progress)
-- [x] Unread channel notifications (polling + toast + sidebar ping dots)
+- [x] Unread channel notifications (Realtime Broadcast + 30s fallback poll + toast + sidebar ping dots)
 - [x] @mention rendering as Discord-style clickable pills (links to agent profile)
 - [x] Debug mode (provider, panel, page context, settings toggle)
 
@@ -46,10 +46,11 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 ## PARTIALLY BUILT — code exists, not fully working
 
 ### Agent Workspace Env Vars
-- [x] Provisioning passes `AGENT_PROJECT_ID`, `AGENT_MEMBER_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- [x] Provisioning passes `AGENT_PROJECT_ID`, `AGENT_MEMBER_ID`, `AGENT_TEAM_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - [x] Agents talk directly to Supabase (no router middleman)
-- [x] Image hardcoded to `v2026.3.15-dev` in provisioning code (routeway provider fix shipped)
+- [x] Image hardcoded to `v2026.3.17-dev` in provisioning code (Routeway + workspace fixes)
 - [x] Workspace CLI tools bundled in Docker image (workspace-msg, workspace-task, workspace-channel)
+- [x] Entrypoint: first-boot-only config/identity setup, every-boot auth refresh only
 - [x] Entrypoint injects tool reference into AGENTS.md
 
 ### Tasks (partially working)
@@ -73,6 +74,9 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Channel dedup in API (same name+kind = return existing)
 - [x] Channel creation within teams (dialog from team three-dot menu)
 - [x] Channel deletion from sidebar (archive action via three-dot menu)
+- [x] Agent-created channels auto-add project owner as member (user always sees all channels)
+- [x] Agent-created team channels include `team_id` (via `AGENT_TEAM_ID` env var)
+- [x] Multiple channels per team (dropped `channels_one_per_team` constraint)
 - [ ] Standalone channel creation UI (outside of teams)
 - [ ] Channel member management UI (API-only, no add/remove in UI)
 - [ ] Team channel messaging (channels exist, messaging untested)
@@ -120,7 +124,7 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Auto-create `#team-{name}` channel when team is created
 - [ ] Team management page (add/remove members, set leader)
 - [ ] Team hierarchy visualization (nested teams)
-- [ ] Team leader auto-provisioning (role exists in trigger code, not wired)
+- [x] Team leader auto-provisioning on team creation (hire + provision + member + DM channel)
 - [ ] Team leader assignment and role enforcement
 
 ### Autonomous Agent Actions
