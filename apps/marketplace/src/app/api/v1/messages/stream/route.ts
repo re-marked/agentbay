@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     })
   }
 
-  let body: { channelId: string; content: string; threadId?: string; taskId?: string }
+  let body: { channelId: string; content: string; threadId?: string; taskId?: string; instanceId?: string }
   try {
     body = await request.json()
   } catch {
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     })
   }
 
-  const { channelId, content, threadId, taskId } = body
+  const { channelId, content, threadId, taskId, instanceId } = body
   if (!channelId || !content) {
     return new Response(JSON.stringify({ error: 'Missing channelId or content' }), {
       status: 400,
@@ -115,10 +115,25 @@ export async function POST(request: Request) {
     })
   }
 
-  // 5. Find agent member — from task assignee (thread mode) or channel members (DM mode)
+  // 5. Find agent member — from instanceId hint, task assignee (thread mode), or channel members (fallback)
   let agentMember: { id: string; instance_id: string; display_name: string } | null = null
 
-  if (taskId) {
+  // Preferred: use the specific instanceId hint from the client (avoids picking wrong agent in multi-agent channels)
+  if (instanceId) {
+    const { data: targetMember } = await service
+      .from('members')
+      .select('id, instance_id, display_name')
+      .eq('instance_id', instanceId)
+      .neq('status', 'archived')
+      .limit(1)
+      .maybeSingle()
+
+    if (targetMember?.instance_id) {
+      agentMember = targetMember as { id: string; instance_id: string; display_name: string }
+    }
+  }
+
+  if (!agentMember && taskId) {
     // In task thread mode, resolve agent from the task's assignee
     const { data: taskRow } = await service
       .from('tasks')
@@ -135,7 +150,7 @@ export async function POST(request: Request) {
   }
 
   if (!agentMember) {
-    // Fall back to finding agent in channel members
+    // Fall back to finding agent in channel members — prefer running instances
     const { data: channelMembers } = await service
       .from('channel_members')
       .select('member_id, members!inner(id, instance_id, display_name)')
@@ -143,10 +158,24 @@ export async function POST(request: Request) {
       .neq('member_id', userMember.id)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const agentMembership = channelMembers?.find((cm: any) => cm.members?.instance_id != null)
-    if (agentMembership) {
+    const agentMemberships = channelMembers?.filter((cm: any) => cm.members?.instance_id != null) ?? []
+
+    if (agentMemberships.length > 0) {
+      // Check instance statuses and prefer a running one
+      const instanceIds = agentMemberships.map((cm: any) => cm.members.instance_id as string)
+      const { data: instances } = await service
+        .from('agent_instances')
+        .select('id, status')
+        .in('id', instanceIds)
+
+      const runningIds = new Set(instances?.filter(i => i.status === 'running').map(i => i.id))
+
+      // Pick running agent first, fall back to any agent
+      const runningMatch = agentMemberships.find((cm: any) => runningIds.has(cm.members.instance_id))
+      const match = runningMatch ?? agentMemberships[0]
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      agentMember = (agentMembership as any).members as {
+      agentMember = (match as any).members as {
         id: string
         instance_id: string
         display_name: string

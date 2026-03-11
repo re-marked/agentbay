@@ -130,6 +130,7 @@ export function ChannelChat({
     channelId,
     threadId,
     taskId,
+    instanceId,
     onDone: useCallback((result: { content: string; tools: ToolUse[] }) => {
       // Bridge the gap: inject optimistic agent messages so content doesn't
       // disappear between streaming-clear and Realtime delivery

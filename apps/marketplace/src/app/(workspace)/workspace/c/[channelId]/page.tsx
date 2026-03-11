@@ -56,17 +56,17 @@ export default async function ChannelPage({
       .map((cm: any) => cm.members?.instance_id)
       .filter(Boolean) as string[]
 
-    let iconMap: Record<string, { icon_url: string | null; category: string; name: string }> = {}
+    let iconMap: Record<string, { icon_url: string | null; category: string; name: string; status: string }> = {}
     if (instanceIds.length > 0) {
       const { data: instances } = await service
         .from('agent_instances')
-        .select('id, agents!inner(name, icon_url, category)')
+        .select('id, status, agents!inner(name, icon_url, category)')
         .in('id', instanceIds)
 
       if (instances) {
         for (const inst of instances) {
           const agent = (inst as any).agents as { name: string; icon_url: string | null; category: string }
-          iconMap[inst.id] = { name: agent?.name ?? '', icon_url: agent?.icon_url ?? null, category: agent?.category ?? '' }
+          iconMap[inst.id] = { name: agent?.name ?? '', icon_url: agent?.icon_url ?? null, category: agent?.category ?? '', status: inst.status }
         }
       }
     }
@@ -84,8 +84,8 @@ export default async function ChannelPage({
         instanceId: member.instance_id,
       }
 
-      // Capture agent info for streaming
-      if (isAgent && member.instance_id) {
+      // Capture agent info for streaming (only if agent is running)
+      if (isAgent && member.instance_id && agentInfo?.status === 'running') {
         agentInstanceId = member.instance_id
         agentName = member.display_name ?? agentInfo?.name ?? 'Agent'
         agentCategory = agentInfo?.category

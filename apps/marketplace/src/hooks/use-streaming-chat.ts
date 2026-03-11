@@ -15,11 +15,13 @@ interface UseStreamingChatOptions {
   threadId?: string
   /** When set, uses task-scoped session for the agent */
   taskId?: string
+  /** Hint: target this specific agent instance (avoids picking the wrong agent in multi-agent channels) */
+  instanceId?: string
   /** Called when the agent turn completes — use to inject an optimistic message before Realtime arrives */
   onDone?: (result: StreamDoneResult) => void
 }
 
-export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStreamingChatOptions) {
+export function useStreamingChat({ channelId, threadId, taskId, instanceId, onDone }: UseStreamingChatOptions) {
   const { log } = useDebug()
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
@@ -49,7 +51,7 @@ export function useStreamingChat({ channelId, threadId, taskId, onDone }: UseStr
         const res = await fetch('/api/v1/messages/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channelId, content: content.trim(), threadId, taskId }),
+          body: JSON.stringify({ channelId, content: content.trim(), threadId, taskId, instanceId }),
           signal: abortController.signal,
         })
 

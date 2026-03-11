@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@agentbay/db/server'
 import { getUser } from '@/lib/auth/get-user'
 import { getActiveProjectId } from '@/lib/projects/queries'
+import { hireTeamLeader } from './team-leader'
 
 /**
  * Create a team in the active project.
@@ -67,13 +68,14 @@ export async function createTeam(formData: FormData) {
     role: 'owner',
   })
 
-  // Add all active agent members in the project to the team channel
+  // Add all active agent members in the project to the team channel (except co-founder)
   const { data: agentMembers } = await service
     .from('members')
     .select('id')
     .eq('project_id', activeProjectId)
     .not('instance_id', 'is', null)
     .neq('status', 'archived')
+    .neq('rank', 'master')
 
   if (agentMembers && agentMembers.length > 0) {
     const channelRows = agentMembers.map(m => ({
@@ -98,6 +100,22 @@ export async function createTeam(formData: FormData) {
         ignoreDuplicates: true,
       }),
     ])
+  }
+
+  // Auto-hire a team leader agent
+  try {
+    await hireTeamLeader({
+      userId: user.id,
+      projectId: activeProjectId,
+      userMemberId,
+      teamId: team.id,
+      teamName: name,
+      teamDescription: description,
+      channelId: channel.id,
+    })
+  } catch (e) {
+    // Non-fatal — team still works without a leader agent
+    console.error('[createTeam] team leader auto-hire failed:', e)
   }
 
   revalidatePath('/workspace', 'layout')
