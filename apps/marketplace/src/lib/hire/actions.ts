@@ -1,18 +1,11 @@
 'use server'
 
-import { createServiceClient } from '@agentbay/db/server'
-import { Agents } from '@agentbay/db/primitives'
+import { Agents, Members } from '@agentbay/db/primitives'
 import { getUser } from '@/lib/auth/get-user'
-import { triggerProvision, triggerDestroy } from '@/lib/trigger'
+import { triggerDestroy } from '@/lib/trigger'
 import { revalidatePath } from 'next/cache'
 import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
-import {
-  createAgentMember,
-  createDMChannel,
-  joinBroadcastChannels,
-  joinTeamChannels,
-  archiveAgentMemberByInstanceId,
-} from '@/lib/workspace/agent-lifecycle'
+import { hireAgentFlow, ensureCorpAndProject } from '@/lib/flows'
 
 interface HireAgentParams {
   agentSlug: string
@@ -29,11 +22,8 @@ export async function hireAgent({ agentSlug }: HireAgentParams) {
   const user = await getUser()
   if (!user) return { error: 'Unauthorized' } as const
 
-  const service = createServiceClient()
-
   // 0. Enforce agent limit
   const count = await Agents.countInstances(user.id)
-
   if (count >= MAX_AGENTS_PER_USER) {
     return { error: `You can't hire more than ${MAX_AGENTS_PER_USER} agents right now.` } as const
   }
@@ -42,101 +32,33 @@ export async function hireAgent({ agentSlug }: HireAgentParams) {
   const agent = await Agents.findDef(agentSlug)
   if (!agent) return { error: `Agent not found: ${agentSlug}` } as const
 
-  // 2. Check if already hired (running or suspended) — fast path for UX
-  const { data: existing } = await service
-    .from('agent_instances')
-    .select('id, status')
-    .eq('user_id', user.id)
-    .eq('agent_id', agent.id)
-    .in('status', ['running', 'suspended', 'provisioning'])
-    .limit(1)
-    .maybeSingle()
-
+  // 2. Check if already hired — fast path for UX
+  const existing = await Agents.isHired(user.id, agent.id)
   if (existing) {
     return { instanceId: existing.id, status: existing.status, alreadyHired: true }
   }
 
-  // 3. Ensure corporation + project exist (not primitives — raw queries)
-  let { data: corp } = await service
-    .from('corporations')
-    .select('id')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+  // 3. Ensure corporation + project exist
+  const projectId = await ensureCorpAndProject(user.id)
 
-  if (!corp) {
-    const { data: newCorp } = await service
-      .from('corporations')
-      .insert({ user_id: user.id, name: 'My Corporation' })
-      .select('id')
-      .single()
-    corp = newCorp
-  }
-
-  const { data: existingProject } = await service
-    .from('projects')
-    .select('id')
-    .eq('user_id', user.id)
-    .eq('name', 'My Workspace')
-    .limit(1)
-    .maybeSingle()
-
-  let projectId = existingProject?.id
-
-  if (!projectId) {
-    const { data: newProject } = await service
-      .from('projects')
-      .insert({
-        user_id: user.id,
-        name: 'My Workspace',
-        corporation_id: corp?.id ?? null,
-      })
-      .select('id')
-      .single()
-    projectId = newProject?.id
-  } else if (corp && !existingProject) {
-    // Link orphan project to corporation
-    await service
-      .from('projects')
-      .update({ corporation_id: corp.id })
-      .eq('id', projectId)
-      .is('corporation_id', null)
-  }
-
-  if (!projectId) return { error: 'Failed to create project' } as const
-
-  // 4. Create agent instance (handles cleanup of destroyed instances + race safety)
+  // 4. Run hire flow
   let instanceId: string
   try {
-    instanceId = await Agents.createInstance(user.id, agent.id, { displayName: agent.name })
-  } catch (e) {
-    return { error: `Failed to create instance: ${e instanceof Error ? e.message : String(e)}` } as const
-  }
-
-  // 4b. Create workspace member + DM channel for the new agent
-  try {
     const { userMemberId } = await ensureWorkspaceBootstrapped(projectId, user.id)
-    const { memberId: agentMemberId } = await createAgentMember(
-      projectId, instanceId, agent.name, 'worker', userMemberId
-    )
-    await createDMChannel(projectId, userMemberId, agentMemberId, agent.name)
-    await joinBroadcastChannels(projectId, agentMemberId)
-    await joinTeamChannels(projectId, agentMemberId)
+    const result = await hireAgentFlow({
+      userId: user.id,
+      projectId,
+      userMemberId,
+      agentId: agent.id,
+      displayName: agent.name,
+      rank: 'worker',
+    })
+    instanceId = result.instanceId
   } catch (e) {
-    // Non-fatal — bootstrap will backfill on next page load
-    console.error('[hire] workspace member setup failed:', e)
+    return { error: `Failed to hire agent: ${e instanceof Error ? e.message : String(e)}` } as const
   }
-
-  // 5. Fire Trigger.dev provision task
-  await triggerProvision({
-    userId: user.id,
-    agentId: agent.id,
-    instanceId,
-  })
 
   revalidatePath('/workspace')
-
   return { instanceId, status: 'provisioning', alreadyHired: false }
 }
 
@@ -147,14 +69,12 @@ export async function removeAgent(instanceId: string) {
   const user = await getUser()
   if (!user) return { error: 'Unauthorized' }
 
-  // Fetch instance and verify ownership
   const inst = await Agents.getInstance(instanceId)
-
   if (!inst || inst.user_id !== user.id) return { error: 'Agent not found' }
   if (inst.status === 'destroyed') return { error: 'Agent already removed' }
 
   // Check workspace rank — block removal of co-founder (rank=master)
-  const archiveResult = await archiveAgentMemberByInstanceId(instanceId)
+  const archiveResult = await Members.archiveByInstanceId(instanceId)
   if (archiveResult?.error) return { error: archiveResult.error }
 
   // Mark as destroying immediately for UI feedback
@@ -164,7 +84,6 @@ export async function removeAgent(instanceId: string) {
   if (inst.fly_app_name !== 'pending' && inst.fly_machine_id !== 'pending') {
     await triggerDestroy({ instanceId })
   } else {
-    // No machine was ever created — just mark destroyed directly
     await Agents.updateInstance(instanceId, { status: 'destroyed' })
   }
 
@@ -180,11 +99,7 @@ export async function checkInstanceStatus(instanceId: string) {
   if (!user) return null
 
   const inst = await Agents.getInstance(instanceId)
-
   if (!inst || inst.user_id !== user.id) return null
 
-  return {
-    id: inst.id,
-    status: inst.status,
-  }
+  return { id: inst.id, status: inst.status }
 }

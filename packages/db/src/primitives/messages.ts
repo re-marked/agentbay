@@ -66,6 +66,16 @@ export async function loadContext(
   }))
 }
 
+/** Count replies in a thread since a given timestamp. */
+export async function countReplies(threadRootId: string, sinceIso: string) {
+  const { count } = await db()
+    .from('channel_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('parent_id', threadRootId)
+    .gt('created_at', sinceIso)
+  return count ?? 0
+}
+
 // ─── Writes ──────────────────────────────────────────────────────────
 
 /**

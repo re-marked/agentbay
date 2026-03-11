@@ -9,6 +9,16 @@ export interface CreateInstanceOpts {
 
 // ─── Agent Definitions (the catalog) ─────────────────────────────────
 
+/** Find an agent definition by ID. */
+export async function findDefById(agentId: string) {
+  const { data } = await db()
+    .from('agents')
+    .select('id, name, slug, docker_image, fly_machine_size, fly_machine_memory_mb, tagline, description, category, icon_url, status')
+    .eq('id', agentId)
+    .maybeSingle()
+  return data
+}
+
 /** Find an agent definition by slug. */
 export async function findDef(slug: string) {
   const { data } = await db()
@@ -177,6 +187,49 @@ export async function listInstances(userId: string) {
     .order('created_at', { ascending: false })
 
   return data ?? []
+}
+
+/** List all running instances with gateway tokens (for heartbeat/health checks). */
+export async function listRunning() {
+  const { data } = await db()
+    .from('agent_instances')
+    .select('id, fly_app_name, fly_machine_id, gateway_token, display_name, user_id, agent_id, status')
+    .eq('status', 'running')
+    .not('gateway_token', 'is', null)
+    .not('fly_app_name', 'is', null)
+  return data ?? []
+}
+
+/** List instances by status array (for health checks). */
+export async function listByStatus(statuses: string[]) {
+  const { data } = await db()
+    .from('agent_instances')
+    .select('id, fly_app_name, fly_machine_id, gateway_token, status, user_id, agent_id, display_name')
+    .in('status', statuses)
+  return data ?? []
+}
+
+/** List idle running instances (last_active_at before cutoff). */
+export async function listIdle(cutoffIso: string) {
+  const { data } = await db()
+    .from('agent_instances')
+    .select('id, fly_app_name, fly_machine_id')
+    .eq('status', 'running')
+    .lt('last_active_at', cutoffIso)
+  return data ?? []
+}
+
+/** Check if an instance is already hired (running/suspended/provisioning). */
+export async function isHired(userId: string, agentId: string) {
+  const { data } = await db()
+    .from('agent_instances')
+    .select('id, status')
+    .eq('user_id', userId)
+    .eq('agent_id', agentId)
+    .in('status', ['running', 'suspended', 'provisioning'])
+    .limit(1)
+    .maybeSingle()
+  return data
 }
 
 /** Count active (non-destroyed) instances for a user. */

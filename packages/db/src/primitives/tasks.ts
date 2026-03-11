@@ -56,6 +56,16 @@ export async function list(projectId: string) {
   }))
 }
 
+/** List active tasks assigned to a member (for heartbeat dispatch). */
+export async function listByAssignee(memberId: string, statuses: string[]) {
+  const { data } = await db()
+    .from('tasks')
+    .select('id, title, description, priority, channel_id, metadata, status, updated_at')
+    .eq('assigned_to', memberId)
+    .in('status', statuses)
+  return data ?? []
+}
+
 /** List tasks with specific filters (for agent API / heartbeat). */
 export async function listFiltered(
   projectId: string,

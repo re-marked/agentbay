@@ -1,5 +1,5 @@
 import { schedules, tasks as triggerTasks, logger } from '@trigger.dev/sdk/v3'
-import { createServiceClient } from '@agentbay/db'
+import { Agents, Members, Channels, Messages, Tasks } from '@agentbay/db/primitives'
 
 /**
  * Heartbeat cron — wakes all running agents every 10 minutes.
@@ -15,22 +15,9 @@ export const heartbeatAgents = schedules.task({
   cron: '*/10 * * * *',
 
   run: async () => {
-    const db = createServiceClient()
+    const instances = await Agents.listRunning()
 
-    // Find all running instances that have a gateway token
-    const { data: instances, error } = await db
-      .from('agent_instances')
-      .select('id, fly_app_name, gateway_token, display_name')
-      .eq('status', 'running')
-      .not('gateway_token', 'is', null)
-      .not('fly_app_name', 'is', null)
-
-    if (error) {
-      logger.error('Failed to fetch running instances', { error: error.message })
-      return
-    }
-
-    if (!instances?.length) {
+    if (!instances.length) {
       logger.info('No running agents to heartbeat')
       return
     }
@@ -40,7 +27,7 @@ export const heartbeatAgents = schedules.task({
     const results = await Promise.allSettled(
       instances.map(async (inst) => {
         // Check if this agent has stale or unannounced tasks to dispatch
-        const dispatched = await dispatchStaleTasks(db, inst.id)
+        const dispatched = await dispatchStaleTasks(inst.id)
         if (dispatched > 0) {
           logger.info(`Dispatched ${dispatched} task(s) for ${inst.display_name}`, { instanceId: inst.id })
           // Skip generic heartbeat — task dispatch is the heartbeat
@@ -104,29 +91,14 @@ export const heartbeatAgents = schedules.task({
  *
  * Respects last_dispatched_at to prevent rapid re-dispatch (minimum 10 min gap).
  */
-async function dispatchStaleTasks(
-  db: ReturnType<typeof createServiceClient>,
-  instanceId: string,
-): Promise<number> {
+async function dispatchStaleTasks(instanceId: string): Promise<number> {
   // Find the agent's member record
-  const { data: member } = await db
-    .from('members')
-    .select('id, project_id')
-    .eq('instance_id', instanceId)
-    .neq('status', 'archived')
-    .limit(1)
-    .maybeSingle()
-
+  const member = await Members.findByInstanceId(instanceId)
   if (!member) return 0
 
   // Find active tasks for this member (assigned or in_progress)
-  const { data: activeTasks } = await db
-    .from('tasks')
-    .select('id, title, description, priority, channel_id, metadata, status, updated_at')
-    .eq('assigned_to', member.id)
-    .in('status', ['assigned', 'in_progress'])
-
-  if (!activeTasks?.length) return 0
+  const activeTasks = await Tasks.listByAssignee(member.id, ['assigned', 'in_progress'])
+  if (!activeTasks.length) return 0
 
   let dispatched = 0
   const now = Date.now()
@@ -149,49 +121,26 @@ async function dispatchStaleTasks(
     if (!threadRootId || !channelId) {
       try {
         // Find #tasks channel for this project
-        const { data: tasksChannel } = await db
-          .from('channels')
-          .select('id')
-          .eq('project_id', member.project_id)
-          .eq('name', 'tasks')
-          .eq('kind', 'broadcast')
-          .maybeSingle()
+        const tasksChannels = await Channels.findBroadcast(member.project_id, 'tasks')
+        if (!tasksChannels.length) continue
 
-        if (!tasksChannel) continue
+        const tasksChannel = tasksChannels[0]
 
         // Resolve assignee name
-        const { data: memberData } = await db
-          .from('members')
-          .select('display_name')
-          .eq('id', member.id)
-          .single()
-
+        const memberData = await Members.findById(member.id)
         const assigneeName = memberData?.display_name ?? 'agent'
         const announcement = `📋 New task: **${task.title}** → assigned to **${assigneeName}**${task.priority !== 'normal' ? ` [${task.priority}]` : ''}`
 
         // Post announcement
-        const { data: msg } = await db
-          .from('channel_messages')
-          .insert({
-            channel_id: tasksChannel.id,
-            sender_id: member.id,
-            content: announcement,
-            message_kind: 'system',
-            depth: 0,
-          })
-          .select('id')
-          .single()
-
-        if (!msg) continue
+        const msgId = await Messages.send(tasksChannel.id, member.id, announcement, {
+          kind: 'system',
+        })
 
         // Store thread_root_id + last_dispatched_at in task metadata
-        await db
-          .from('tasks')
-          .update({
-            channel_id: tasksChannel.id,
-            metadata: { ...metadata, thread_root_id: msg.id, last_dispatched_at: new Date().toISOString() },
-          })
-          .eq('id', task.id)
+        await Tasks.update(task.id, {
+          channelId: tasksChannel.id,
+          metadata: { ...metadata, thread_root_id: msgId, last_dispatched_at: new Date().toISOString() },
+        })
 
         // Dispatch to agent
         await triggerTasks.trigger('dispatch-task-to-agent', {
@@ -199,7 +148,7 @@ async function dispatchStaleTasks(
           instanceId,
           agentMemberId: member.id,
           channelId: tasksChannel.id,
-          threadRootId: msg.id,
+          threadRootId: msgId,
           title: task.title,
           description: task.description,
           priority: task.priority,
@@ -221,23 +170,16 @@ async function dispatchStaleTasks(
 
     // Check for recent thread activity
     const cutoff = new Date(now - stalenessThreshold).toISOString()
-    const { count } = await db
-      .from('channel_messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('parent_id', threadRootId)
-      .gt('created_at', cutoff)
+    const replyCount = await Messages.countReplies(threadRootId, cutoff)
 
-    if (count && count > 0) continue // Recent activity exists, skip
+    if (replyCount > 0) continue // Recent activity exists, skip
 
     // Stale — re-dispatch
     try {
       // Update last_dispatched_at
-      await db
-        .from('tasks')
-        .update({
-          metadata: { ...metadata, last_dispatched_at: new Date().toISOString() },
-        })
-        .eq('id', task.id)
+      await Tasks.update(task.id, {
+        metadata: { ...metadata, last_dispatched_at: new Date().toISOString() },
+      })
 
       await triggerTasks.trigger('dispatch-task-to-agent', {
         taskId: task.id,

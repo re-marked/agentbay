@@ -1,5 +1,5 @@
 import { schedules, logger } from '@trigger.dev/sdk/v3'
-import { createServiceClient } from '@agentbay/db'
+import { Agents } from '@agentbay/db/primitives'
 import { FlyClient } from '@agentbay/fly'
 
 const IDLE_THRESHOLD_HOURS = 72 // 3 days — at current scale, cold starts hurt more than costs
@@ -10,18 +10,12 @@ export const shutdownIdleMachines = schedules.task({
   maxDuration: 120,
 
   run: async () => {
-    const db = createServiceClient()
     const fly = new FlyClient()
-
     const cutoff = new Date(Date.now() - IDLE_THRESHOLD_HOURS * 60 * 60 * 1000).toISOString()
 
-    const { data: idle } = await db
-      .from('agent_instances')
-      .select('id, fly_app_name, fly_machine_id')
-      .eq('status', 'running')
-      .lt('last_active_at', cutoff)
+    const idle = await Agents.listIdle(cutoff)
 
-    if (!idle?.length) {
+    if (!idle.length) {
       logger.info('No idle machines to shut down')
       return
     }
@@ -32,10 +26,7 @@ export const shutdownIdleMachines = schedules.task({
       idle.map(async (inst) => {
         try {
           await fly.stopMachine(inst.fly_app_name, inst.fly_machine_id)
-          await db
-            .from('agent_instances')
-            .update({ status: 'stopped' })
-            .eq('id', inst.id)
+          await Agents.updateInstance(inst.id, { status: 'stopped' })
           logger.info(`Stopped idle machine ${inst.fly_machine_id}`)
         } catch (err) {
           logger.error(`Failed to stop machine ${inst.fly_machine_id}`, { err })

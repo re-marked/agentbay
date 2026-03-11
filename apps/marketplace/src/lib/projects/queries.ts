@@ -1,7 +1,6 @@
 import { cache } from 'react'
 import { cookies } from 'next/headers'
-import { createServiceClient } from '@agentbay/db/server'
-import { Agents } from '@agentbay/db/primitives'
+import { Agents, Corporations, Projects } from '@agentbay/db/primitives'
 import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
 import { ensureCoFounderHired } from '@/lib/workspace/co-founder'
 
@@ -24,39 +23,16 @@ export interface ProjectAgentInstance {
  * Creates "My Corporation" with a default "My Workspace" project if none exist.
  */
 async function ensureCorporation(userId: string) {
-  const service = createServiceClient()
+  const corps = await Corporations.findByUser(userId)
 
-  // Check for existing corporations
-  const { data: corps } = await service
-    .from('corporations')
-    .select('id, name, co_founder_instance_id')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true })
-
-  if (corps && corps.length > 0) {
+  if (corps.length > 0) {
     return { corporationId: corps[0].id, corporations: corps }
   }
 
-  // Create default corporation
-  const { data: newCorp } = await service
-    .from('corporations')
-    .insert({ user_id: userId, name: 'My Corporation', description: 'Your personal corporation' })
-    .select('id, name, co_founder_instance_id')
-    .single()
+  const corporationId = await Corporations.create(userId, 'My Corporation', 'Your personal corporation')
 
-  if (!newCorp) {
-    // Race condition — another request created it
-    const { data: fallback } = await service
-      .from('corporations')
-      .select('id, name, co_founder_instance_id')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .single()
-    return { corporationId: fallback!.id, corporations: [fallback!] }
-  }
-
-  return { corporationId: newCorp.id, corporations: [newCorp] }
+  const newCorps = await Corporations.findByUser(userId)
+  return { corporationId, corporations: newCorps }
 }
 
 /**
@@ -64,50 +40,30 @@ async function ensureCorporation(userId: string) {
  * Ensures corporation and project exist.
  */
 export const getActiveProjectId = cache(async function getActiveProjectId(userId: string) {
-  const service = createServiceClient()
-
   // 1. Ensure corporation exists
   const { corporationId, corporations } = await ensureCorporation(userId)
 
   // 2. Get projects for this corporation
-  const { data: projects } = await service
-    .from('projects')
-    .select('id, name, description')
-    .eq('corporation_id', corporationId)
-    .order('created_at', { ascending: true })
-
-  let userProjects = projects ?? []
+  let userProjects = await Projects.listByCorporation(corporationId)
 
   // Also pick up legacy projects (no corporation_id) and link them
-  const { data: orphanProjects } = await service
-    .from('projects')
-    .select('id, name, description')
-    .eq('user_id', userId)
-    .is('corporation_id', null)
+  const orphanProjects = await Projects.findOrphans(userId)
 
-  if (orphanProjects && orphanProjects.length > 0) {
-    // Link orphan projects to this corporation
+  if (orphanProjects.length > 0) {
     const orphanIds = orphanProjects.map(p => p.id)
-    await service
-      .from('projects')
-      .update({ corporation_id: corporationId })
-      .in('id', orphanIds)
+    await Projects.linkToCorporation(orphanIds, corporationId)
     userProjects = [...userProjects, ...orphanProjects]
   }
 
   // 3. Create default project if none exist
   if (userProjects.length === 0) {
-    const { data: newProject } = await service
-      .from('projects')
-      .insert({
-        name: 'My Workspace',
-        description: 'Your first project',
-        user_id: userId,
-        corporation_id: corporationId,
-      })
-      .select('id, name, description')
-      .single()
-    if (newProject) userProjects = [newProject]
+    const newProjectId = await Projects.create({
+      name: 'My Workspace',
+      description: 'Your first project',
+      userId,
+      corporationId,
+    })
+    userProjects = [{ id: newProjectId, name: 'My Workspace', description: 'Your first project' }]
   }
 
   // 4. Resolve active project from cookie

@@ -1,12 +1,5 @@
-import { createServiceClient } from '@agentbay/db/server'
-import { Agents, Members, Messages } from '@agentbay/db/primitives'
-import { triggerProvision } from '@/lib/trigger'
-import {
-  createAgentMember,
-  createDMChannel,
-  joinBroadcastChannels,
-  joinTeamChannels,
-} from './agent-lifecycle'
+import { Agents, Corporations, Members } from '@agentbay/db/primitives'
+import { hireAgentFlow } from '@/lib/flows'
 
 const CO_FOUNDER_GREETING = `Hey! I'm your co-founder. I've been here since the moment you created this corporation — and I'm not going anywhere.
 
@@ -17,13 +10,6 @@ So — what are we building? Tell me about what you're working on and I'll start
 /**
  * Ensure the Personal AI co-founder is hired for this corporation.
  * Idempotent — runs on every page load, fast after first (single SELECT).
- *
- * Creates:
- * 1. agent_instance (status=provisioning)
- * 2. member (rank=master, spawned_by=userMemberId)
- * 3. DM channel between user and co-founder
- * 4. Joins all broadcast channels
- * 5. Fires Trigger.dev provision task with isCoFounder=true
  */
 export async function ensureCoFounderHired(
   userId: string,
@@ -33,53 +19,32 @@ export async function ensureCoFounderHired(
 ): Promise<{ instanceId: string; alreadyExisted: boolean }> {
   // 1. Find the Personal AI agent definition
   const agent = await Agents.findDef('personal-ai')
+  if (!agent) throw new Error('Personal AI agent not found in database')
 
-  if (!agent) {
-    // Dev env without seed data — nothing to do
-    throw new Error('Personal AI agent not found in database')
-  }
-
-  // 2-4. Create instance (idempotent — checks existing, cleans destroyed, race-safe)
+  // 2. Create instance (idempotent — checks existing, cleans destroyed, race-safe)
   const instanceId = await Agents.createInstance(userId, agent.id, {
     displayName: 'Personal AI',
   })
 
-  // Detect if already fully set up by checking for existing member
+  // 3. Detect if already fully set up by checking for existing member
   const existingMember = await Members.findByInstance(projectId, instanceId)
   if (existingMember) {
     return { instanceId, alreadyExisted: true }
   }
 
-  // 5. Link co-founder to corporation (no primitive for corporations)
-  const service = createServiceClient()
-  await service
-    .from('corporations')
-    .update({ co_founder_instance_id: instanceId })
-    .eq('id', corporationId)
+  // 4. Link co-founder to corporation
+  await Corporations.linkCoFounder(corporationId, instanceId)
 
-  // 6. Create workspace member (rank=master)
-  const { memberId: agentMemberId } = await createAgentMember(
-    projectId, instanceId, 'Personal AI', 'master', userMemberId
-  )
-
-  // 7. Create DM channel
-  const { channelId } = await createDMChannel(projectId, userMemberId, agentMemberId, 'Personal AI')
-
-  // 8. Seed greeting message so the DM isn't empty when user first opens it
-  await Messages.send(channelId, agentMemberId, CO_FOUNDER_GREETING)
-
-  // 9. Join broadcast + team channels
-  await joinBroadcastChannels(projectId, agentMemberId)
-  await joinTeamChannels(projectId, agentMemberId)
-
-  // 10. Fire provisioning task
-  await triggerProvision({
+  // 5. Run the hire flow (member + DM + greeting + channels + provision)
+  await hireAgentFlow({
     userId,
-    agentId: agent.id,
-    instanceId,
-    isCoFounder: true,
     projectId,
-    memberId: agentMemberId,
+    userMemberId,
+    agentId: agent.id,
+    displayName: 'Personal AI',
+    rank: 'master',
+    greeting: CO_FOUNDER_GREETING,
+    provisionExtras: { isCoFounder: true },
   })
 
   return { instanceId, alreadyExisted: false }

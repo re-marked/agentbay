@@ -1,5 +1,5 @@
 import { task, logger } from '@trigger.dev/sdk/v3'
-import { createServiceClient } from '@agentbay/db'
+import { Agents } from '@agentbay/db/primitives'
 import { FlyClient } from '@agentbay/fly'
 
 export interface DestroyPayload {
@@ -12,16 +12,10 @@ export const destroyAgentMachine = task({
   retry: { maxAttempts: 3, factor: 2, minTimeoutInMs: 3_000 },
 
   run: async ({ instanceId }: DestroyPayload) => {
-    const db = createServiceClient()
     const fly = new FlyClient()
 
     try {
-      const { data: inst } = await db
-        .from('agent_instances')
-        .select('fly_app_name, fly_machine_id, fly_volume_id')
-        .eq('id', instanceId)
-        .single()
-
+      const inst = await Agents.getInstance(instanceId)
       if (!inst) throw new Error(`Instance not found: ${instanceId}`)
 
       // Skip if instance was already reset to pending (e.g. by re-provision)
@@ -41,27 +35,20 @@ export const destroyAgentMachine = task({
       logger.info('Machine destroyed', { machineId: inst.fly_machine_id })
 
       // Delete volume
-      if (inst.fly_volume_id) {
-        await fly.deleteVolume(inst.fly_app_name, inst.fly_volume_id)
-        logger.info('Volume deleted', { volumeId: inst.fly_volume_id })
+      if ((inst as any).fly_volume_id) {
+        await fly.deleteVolume(inst.fly_app_name, (inst as any).fly_volume_id)
+        logger.info('Volume deleted', { volumeId: (inst as any).fly_volume_id })
       }
 
       // Update DB
-      await db
-        .from('agent_instances')
-        .update({ status: 'destroyed' })
-        .eq('id', instanceId)
-
+      await Agents.updateInstance(instanceId, { status: 'destroyed' })
       logger.info('Instance marked destroyed', { instanceId })
     } catch (err) {
       logger.error('Destroy failed', {
         instanceId,
         error: err instanceof Error ? err.message : String(err),
       })
-      await db
-        .from('agent_instances')
-        .update({ status: 'error' })
-        .eq('id', instanceId)
+      await Agents.updateInstance(instanceId, { status: 'error' })
       throw err
     }
   },

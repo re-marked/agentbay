@@ -1,8 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createServiceClient } from '@agentbay/db/server'
-import { Members, Channels } from '@agentbay/db/primitives'
+import { Members, Channels, Teams, TeamMembers } from '@agentbay/db/primitives'
+import { createTeamFlow } from '@/lib/flows'
 import { getUser } from '@/lib/auth/get-user'
 import { getActiveProjectId } from '@/lib/projects/queries'
 import { hireTeamLeader } from './team-leader'
@@ -22,68 +22,13 @@ export async function createTeam(formData: FormData) {
   const { activeProjectId, userMemberId } = await getActiveProjectId(user.id)
   if (!activeProjectId || !userMemberId) throw new Error('No active project')
 
-  const service = createServiceClient()
-
-  // Create the team with the user as leader
-  const { data: team, error: teamError } = await service
-    .from('teams')
-    .insert({
-      project_id: activeProjectId,
-      name,
-      description,
-      leader_member_id: userMemberId,
-      status: 'active',
-    })
-    .select('id')
-    .single()
-
-  if (!team) throw new Error(`Failed to create team: ${teamError?.message}`)
-
-  // Auto-create the team channel
-  const channelName = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-  const channelId = await Channels.create(activeProjectId, {
-    name: channelName,
-    kind: 'team',
-    teamId: team.id,
-    description: `Team channel for ${name}`,
+  // Run the create-team flow
+  const { teamId, channelId } = await createTeamFlow({
+    projectId: activeProjectId,
+    userMemberId,
+    name,
+    description,
   })
-
-  // Add creator as team member (leader)
-  await service.from('team_members').insert({
-    team_id: team.id,
-    member_id: userMemberId,
-    role: 'leader',
-  })
-
-  // Add creator to the channel
-  await Channels.addMember(channelId, userMemberId, 'owner')
-
-  // Add all active agent members in the project to the team channel (except co-founder)
-  const agentMembers = await Members.listActive(activeProjectId, {
-    type: 'agent',
-    excludeRank: 'master',
-  })
-
-  if (agentMembers.length > 0) {
-    const channelMembers = agentMembers.map(m => ({
-      memberId: m.id,
-      role: 'participant' as const,
-    }))
-
-    const teamRows = agentMembers.map(m => ({
-      team_id: team.id,
-      member_id: m.id,
-      role: 'worker' as const,
-    }))
-
-    await Promise.all([
-      Channels.addMembers(channelId, channelMembers),
-      service.from('team_members').upsert(teamRows, {
-        onConflict: 'team_id,member_id',
-        ignoreDuplicates: true,
-      }),
-    ])
-  }
 
   // Auto-hire a team leader agent
   try {
@@ -91,7 +36,7 @@ export async function createTeam(formData: FormData) {
       userId: user.id,
       projectId: activeProjectId,
       userMemberId,
-      teamId: team.id,
+      teamId,
       teamName: name,
       teamDescription: description,
       channelId,
@@ -102,7 +47,7 @@ export async function createTeam(formData: FormData) {
   }
 
   revalidatePath('/workspace', 'layout')
-  return { teamId: team.id, channelId }
+  return { teamId, channelId }
 }
 
 /**
@@ -112,24 +57,10 @@ export async function archiveTeam(teamId: string) {
   const user = await getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const service = createServiceClient()
-
-  // Verify ownership
-  const { data: team } = await service
-    .from('teams')
-    .select('id, project_id')
-    .eq('id', teamId)
-    .single()
-
+  const team = await Teams.findById(teamId)
   if (!team) throw new Error('Team not found')
 
-  // Archive the team
-  await service
-    .from('teams')
-    .update({ status: 'archived' })
-    .eq('id', teamId)
-
-  // Archive team channels
+  await Teams.archive(teamId)
   await Channels.archiveByTeam(teamId)
 
   revalidatePath('/workspace', 'layout')
@@ -143,23 +74,12 @@ export async function addAgentToTeam(teamId: string, instanceId: string) {
   const user = await getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const service = createServiceClient()
-
-  // Resolve agent's member row
   const member = await Members.findByInstanceId(instanceId)
   if (!member) throw new Error('Agent not found')
 
-  // Add to team_members
-  await service
-    .from('team_members')
-    .upsert(
-      { team_id: teamId, member_id: member.id, role: 'worker' },
-      { onConflict: 'team_id,member_id', ignoreDuplicates: true },
-    )
+  await TeamMembers.add(teamId, member.id, 'worker')
 
-  // Add to all team channels
   const teamChannels = await Channels.findByTeam(teamId, 'team')
-
   if (teamChannels.length > 0) {
     await Promise.all(
       teamChannels.map(c =>

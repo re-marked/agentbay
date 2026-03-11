@@ -1,11 +1,5 @@
-import { createServiceClient } from '@agentbay/db/server'
-import { Agents, Channels, Messages } from '@agentbay/db/primitives'
-import { triggerProvision } from '@/lib/trigger'
-import {
-  createAgentMember,
-  createDMChannel,
-  joinBroadcastChannels,
-} from './agent-lifecycle'
+import { Agents, Channels, Teams, TeamMembers } from '@agentbay/db/primitives'
+import { hireAgentFlow } from '@/lib/flows'
 
 const TEAM_LEADER_GREETING = (teamName: string) =>
   `I'm the leader of the **${teamName}** team. Created the moment this team was formed — my existence is tied to its success.
@@ -27,15 +21,6 @@ interface HireTeamLeaderParams {
 /**
  * Hire a team leader agent for a newly created team.
  * Called automatically from createTeam().
- *
- * Creates:
- * 1. agent definition (idempotent via Agents.createDef)
- * 2. agent_instance (status=provisioning, cleans up destroyed first)
- * 3. member (rank=leader)
- * 4. Updates team.leader_member_id to the agent
- * 5. DM channel with greeting message
- * 6. Joins broadcast channels + own team channel
- * 7. Fires Trigger.dev provision task with isTeamLeader=true
  */
 export async function hireTeamLeader({
   userId,
@@ -46,8 +31,6 @@ export async function hireTeamLeader({
   teamDescription,
   channelId,
 }: HireTeamLeaderParams): Promise<{ instanceId: string; memberId: string }> {
-  const service = createServiceClient()
-
   // 1. Ensure team-leader agent definition exists (idempotent, race-safe)
   const agentId = await Agents.createDef({
     slug: 'team-leader',
@@ -60,59 +43,31 @@ export async function hireTeamLeader({
     creatorId: userId,
   })
 
-  // 2. Create agent_instance (cleans up destroyed instances, race-safe)
+  // 2. Run the hire flow (instance + member + DM + greeting + channels + provision)
   const displayName = `${teamName} Leader`
-  const instanceId = await Agents.createInstance(userId, agentId, {
+  const result = await hireAgentFlow({
+    userId,
+    projectId,
+    userMemberId,
+    agentId,
     displayName,
+    rank: 'leader',
+    greeting: TEAM_LEADER_GREETING(teamName),
     teamId,
+    provisionExtras: {
+      isTeamLeader: true,
+      teamId,
+      teamName,
+      teamDescription,
+    },
   })
 
-  // 3. Create workspace member (rank=leader)
-  const { memberId } = await createAgentMember(
-    projectId,
-    instanceId,
-    displayName,
-    'leader',
-    userMemberId,
-  )
-
-  // 4. Update team.leader_member_id to the agent (replaces the user placeholder)
-  await service.from('teams').update({ leader_member_id: memberId }).eq('id', teamId)
-
-  // 5. Add to team_members as leader + team channel as participant
+  // 3. Post-flow: update team leader + add to team members + team channel
   await Promise.all([
-    service.from('team_members').upsert(
-      { team_id: teamId, member_id: memberId, role: 'leader' as const },
-      { onConflict: 'team_id,member_id', ignoreDuplicates: true },
-    ),
-    Channels.addMember(channelId, memberId, 'participant'),
+    Teams.update(teamId, { leader_member_id: result.memberId }),
+    TeamMembers.add(teamId, result.memberId, 'leader'),
+    Channels.addMember(channelId, result.memberId, 'participant'),
   ])
 
-  // 6. Create DM channel + seed greeting
-  const { channelId: dmChannelId } = await createDMChannel(
-    projectId,
-    userMemberId,
-    memberId,
-    displayName,
-  )
-
-  await Messages.send(dmChannelId, memberId, TEAM_LEADER_GREETING(teamName))
-
-  // 7. Join broadcast channels
-  await joinBroadcastChannels(projectId, memberId)
-
-  // 8. Fire provisioning task with team leader context
-  await triggerProvision({
-    userId,
-    agentId,
-    instanceId,
-    isTeamLeader: true,
-    projectId,
-    memberId,
-    teamId,
-    teamName,
-    teamDescription,
-  })
-
-  return { instanceId, memberId }
+  return { instanceId: result.instanceId, memberId: result.memberId }
 }

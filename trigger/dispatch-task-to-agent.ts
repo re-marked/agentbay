@@ -1,5 +1,5 @@
 import { task, tasks as triggerTasks, logger } from '@trigger.dev/sdk/v3'
-import { createServiceClient } from '@agentbay/db'
+import { Agents, Members, Messages, Tasks } from '@agentbay/db/primitives'
 
 export interface DispatchTaskPayload {
   taskId: string
@@ -23,14 +23,9 @@ export const dispatchTaskToAgent = task({
 
   run: async (payload: DispatchTaskPayload) => {
     const { taskId, instanceId, agentMemberId, channelId, threadRootId, title, description, priority } = payload
-    const db = createServiceClient()
 
     // 1. Get agent connection info
-    const { data: instance } = await db
-      .from('agent_instances')
-      .select('fly_app_name, gateway_token, status, user_id, agent_id, display_name')
-      .eq('id', instanceId)
-      .single()
+    const instance = await Agents.getInstance(instanceId)
 
     if (!instance) {
       logger.error('Instance not found', { instanceId })
@@ -42,17 +37,9 @@ export const dispatchTaskToAgent = task({
       if (['destroyed', 'error', 'stopped'].includes(instance.status)) {
         logger.warn('Agent down — triggering auto-reprovision', { instanceId, status: instance.status })
 
-        const { data: member } = await db
-          .from('members')
-          .select('id, project_id')
-          .eq('instance_id', instanceId)
-          .neq('status', 'archived')
-          .limit(1)
-          .maybeSingle()
+        const member = await Members.findByInstanceId(instanceId)
 
-        await db.from('agent_instances')
-          .update({ status: 'provisioning' })
-          .eq('id', instanceId)
+        await Agents.updateInstance(instanceId, { status: 'provisioning' })
 
         try {
           await triggerTasks.trigger('provision-agent-machine', {
@@ -68,12 +55,9 @@ export const dispatchTaskToAgent = task({
         }
 
         // Notify in the task thread
-        await db.from('channel_messages').insert({
-          channel_id: channelId,
-          sender_id: agentMemberId,
-          content: 'Agent is restarting — will resume this task when back online.',
-          message_kind: 'system',
-          parent_id: threadRootId,
+        await Messages.send(channelId, agentMemberId, 'Agent is restarting — will resume this task when back online.', {
+          kind: 'system',
+          parentId: threadRootId,
           depth: 1,
         })
       } else {
@@ -84,26 +68,17 @@ export const dispatchTaskToAgent = task({
     }
 
     // 2. Post dispatch status message to thread
-    await db.from('channel_messages').insert({
-      channel_id: channelId,
-      sender_id: agentMemberId,
-      content: `Working on this task...`,
-      message_kind: 'system',
-      parent_id: threadRootId,
+    await Messages.send(channelId, agentMemberId, 'Working on this task...', {
+      kind: 'system',
+      parentId: threadRootId,
       depth: 1,
     })
 
     // 3. Update task status → in_progress
-    await db
-      .from('tasks')
-      .update({ status: 'in_progress', started_at: new Date().toISOString() })
-      .eq('id', taskId)
+    await Tasks.update(taskId, { status: 'in_progress' })
 
     // 4. Mark agent as working
-    await db
-      .from('members')
-      .update({ status: 'working' })
-      .eq('id', agentMemberId)
+    await Members.updateStatus(agentMemberId, 'working')
 
     // 5. Build instruction message
     const instruction = [
@@ -133,7 +108,6 @@ export const dispatchTaskToAgent = task({
           model: 'main',
           messages: [{ role: 'user', content: instruction }],
           stream: false,
-          // OpenClaw session key for isolated task context
           ...(sessionKey ? { metadata: { sessionKey } } : {}),
         }),
         signal: AbortSignal.timeout(240_000), // 4 min timeout
@@ -144,12 +118,9 @@ export const dispatchTaskToAgent = task({
         logger.error('Agent dispatch failed', { status: res.status, body: text.slice(0, 500) })
 
         // Post error to thread
-        await db.from('channel_messages').insert({
-          channel_id: channelId,
-          sender_id: agentMemberId,
-          content: `Failed to work on task (HTTP ${res.status})`,
-          message_kind: 'system',
-          parent_id: threadRootId,
+        await Messages.send(channelId, agentMemberId, `Failed to work on task (HTTP ${res.status})`, {
+          kind: 'system',
+          parentId: threadRootId,
           depth: 1,
         })
 
@@ -164,12 +135,8 @@ export const dispatchTaskToAgent = task({
 
       // 7. Persist agent response as thread reply
       if (content) {
-        await db.from('channel_messages').insert({
-          channel_id: channelId,
-          sender_id: agentMemberId,
-          content,
-          message_kind: 'text',
-          parent_id: threadRootId,
+        await Messages.send(channelId, agentMemberId, content, {
+          parentId: threadRootId,
           depth: 1,
         })
       }
@@ -177,10 +144,7 @@ export const dispatchTaskToAgent = task({
       logger.info('Task dispatch complete', { taskId, contentLength: content.length })
 
       // 8. Mark agent idle
-      await db
-        .from('members')
-        .update({ status: 'idle' })
-        .eq('id', agentMemberId)
+      await Members.updateStatus(agentMemberId, 'idle')
 
       return { ok: true, content }
     } catch (err) {
@@ -188,20 +152,14 @@ export const dispatchTaskToAgent = task({
       logger.error('Task dispatch error', { taskId, error: message })
 
       // Post error to thread
-      await db.from('channel_messages').insert({
-        channel_id: channelId,
-        sender_id: agentMemberId,
-        content: `Error while working on task: ${message}`,
-        message_kind: 'system',
-        parent_id: threadRootId,
+      await Messages.send(channelId, agentMemberId, `Error while working on task: ${message}`, {
+        kind: 'system',
+        parentId: threadRootId,
         depth: 1,
       })
 
       // Mark agent idle
-      await db
-        .from('members')
-        .update({ status: 'idle' })
-        .eq('id', agentMemberId)
+      await Members.updateStatus(agentMemberId, 'idle')
 
       throw err // rethrow so Trigger.dev retries
     }

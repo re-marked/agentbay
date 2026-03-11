@@ -86,6 +86,30 @@ export async function findByTeam(teamId: string, kind?: string) {
   return data ?? []
 }
 
+/** List all active broadcast channels in a project. */
+export async function listBroadcasts(projectId: string) {
+  const { data } = await db()
+    .from('channels')
+    .select('id, name, description')
+    .eq('project_id', projectId)
+    .eq('kind', 'broadcast')
+    .eq('archived', false)
+    .order('name', { ascending: true })
+  return data ?? []
+}
+
+/** List all active team channels in a project (with team_id). */
+export async function listTeamChannels(projectId: string) {
+  const { data } = await db()
+    .from('channels')
+    .select('id, name, description, team_id')
+    .eq('project_id', projectId)
+    .eq('kind', 'team')
+    .eq('archived', false)
+    .order('name', { ascending: true })
+  return data ?? []
+}
+
 /** Count broadcast channels in a project by names. */
 export async function countBroadcast(projectId: string, names: string[]) {
   const { count } = await db()

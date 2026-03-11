@@ -1,5 +1,6 @@
 import { task, logger } from '@trigger.dev/sdk/v3'
 import { createServiceClient } from '@agentbay/db'
+import { Agents } from '@agentbay/db/primitives'
 import { FlyClient } from '@agentbay/fly'
 import { AGENT_ROLES } from './agent-roles'
 import { PERSONAL_AI_ROLE } from './personal-ai-role'
@@ -85,37 +86,30 @@ export const provisionAgentMachine = task({
 
   // Only mark as error after ALL retries are exhausted
   onFailure: async ({ payload, error }) => {
-    const db = createServiceClient()
     logger.error('Provisioning failed permanently (all retries exhausted)', {
       instanceId: payload.instanceId,
       error: error instanceof Error ? error.message : String(error),
     })
-    await db
-      .from('agent_instances')
-      .update({ status: 'error' })
-      .eq('id', payload.instanceId)
+    await Agents.updateInstance(payload.instanceId, { status: 'error' })
   },
 
   run: async (payload: ProvisionPayload) => {
     const { userId, agentId, instanceId, role: roleId, isCoFounder, isTeamLeader, teamId, teamName, teamDescription, projectId, memberId } = payload
-    const db = createServiceClient()
     const fly = new FlyClient()
 
     try {
       // ── 1. Load agent definition ─────────────────────────────────────────
-      const { data: agent, error: agentErr } = await db
-        .from('agents')
-        .select('slug, docker_image, fly_machine_size, fly_machine_memory_mb')
-        .eq('id', agentId)
-        .single()
-
-      if (agentErr || !agent) throw new Error(`Agent not found: ${agentId}`)
+      const agent = await Agents.findDefById(agentId)
+      if (!agent) throw new Error(`Agent not found: ${agentId}`)
 
       // ── 1b. Load role definition if this is a sub-agent ──────────────────
       const role = roleId ? AGENT_ROLES[roleId] : undefined
       if (roleId && !role) throw new Error(`Unknown role: ${roleId}`)
 
       // ── 2. Load user's API keys (BYOK) and model preference ─────────────
+      // These tables don't have primitives — they're only used by provision
+      const db = createServiceClient()
+
       const { data: apiKeys } = await db
         .from('user_api_keys')
         .select('provider, api_key')
@@ -157,7 +151,7 @@ export const provisionAgentMachine = task({
         throw new Error('No API keys configured. Add at least one key in Settings.')
       }
 
-      const image = agent.docker_image ?? BASE_IMAGE
+      const image = (agent as any).docker_image ?? BASE_IMAGE
       // Co-founder gets special name, team leaders by team ID, sub-agents by role, master agents by slug
       const appName = isCoFounder
         ? `ab-cofounder-${userId.slice(0, 8)}`
@@ -176,10 +170,6 @@ export const provisionAgentMachine = task({
       logger.info('Fly app ready with IPs', { appName: app.name })
 
       // ── 4. Clean up orphaned machines and volumes ──────────────────────────
-      // On retry after partial success, a machine from the previous attempt may
-      // still be running with a different gateway token. Destroy all existing
-      // machines so the new one is the sole instance (prevents load-balancing
-      // between machines with different tokens → "Unauthorized" errors).
       const existingMachines = await fly.listMachines(appName)
       for (const m of existingMachines) {
         try {
@@ -190,8 +180,6 @@ export const provisionAgentMachine = task({
         }
       }
 
-      // Orphaned volumes are pinned to hosts that may be full, causing 412
-      // "insufficient resources" errors. Delete them so Fly picks a healthy host.
       const existingVolumes = await fly.listVolumes(appName)
       for (const v of existingVolumes) {
         if (!v.attached_machine_id) {
@@ -213,7 +201,6 @@ export const provisionAgentMachine = task({
       logger.info('Volume created', { volumeId: volume.id })
 
       // ── 5. Create machine ─────────────────────────────────────────────────
-      // Generate team leader role once (used for both env vars and config overrides)
       const teamLeaderRole = isTeamLeader && teamName
         ? generateTeamLeaderRole(teamName, teamDescription ?? null)
         : null
@@ -237,18 +224,13 @@ export const provisionAgentMachine = task({
       // Workspace context — all agents get Supabase direct access + identity
       if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
       if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
-      // Agents talk directly to Supabase (no Next.js middleman)
       if (process.env.NEXT_PUBLIC_SUPABASE_URL) roleEnv.SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
       if (process.env.SUPABASE_SERVICE_ROLE_KEY) roleEnv.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-      // Build OpenClaw config overrides to set the user's preferred model.
-      // Routeway is primary for agentic usage; Google/others are fallbacks.
       const modelOverrides = {
         agents: { defaults: { model: { primary: defaultModel }, sandbox: { mode: 'off' } } },
       }
 
-      // Merge role overrides (e.g. sandbox:off) with model overrides (user's preferred model).
-      // Model overrides take precedence — prevents roles from hardcoding stale models.
       const roleOcOverrides = (isCoFounder
         ? PERSONAL_AI_ROLE.openclawOverrides
         : teamLeaderRole
@@ -297,7 +279,7 @@ export const provisionAgentMachine = task({
           guest: {
             cpu_kind: 'shared',
             cpus: 2,
-            memory_mb: Math.max(agent.fly_machine_memory_mb ?? 2048, 2048),
+            memory_mb: Math.max((agent as any).fly_machine_memory_mb ?? 2048, 2048),
           },
           restart: { policy: 'always', max_retries: 5 },
         },
@@ -310,11 +292,9 @@ export const provisionAgentMachine = task({
       logger.info('Machine started', { machineId: machine.id })
 
       // ── 6b. Wait for health check to pass ──────────────────────────────
-      // OpenClaw takes ~50s to initialize. Don't mark as running until
-      // the /health endpoint responds 200 so users can't chat too early.
       const healthUrl = `https://${appName}.fly.dev/healthz`
-      const healthTimeout = 120_000 // 2 minutes max
-      const healthInterval = 5_000  // poll every 5s
+      const healthTimeout = 120_000
+      const healthInterval = 5_000
       const healthStart = Date.now()
 
       while (Date.now() - healthStart < healthTimeout) {
@@ -335,17 +315,14 @@ export const provisionAgentMachine = task({
       }
 
       // ── 7. Store machine info + gateway token in DB ──────────────────────
-      await db
-        .from('agent_instances')
-        .update({
-          fly_app_name: appName,
-          fly_machine_id: machine.id,
-          fly_volume_id: volume.id,
-          gateway_token: gatewayToken,
-          region: FLY_REGION,
-          status: 'running',
-        })
-        .eq('id', instanceId)
+      await Agents.updateInstance(instanceId, {
+        fly_app_name: appName,
+        fly_machine_id: machine.id,
+        fly_volume_id: volume.id,
+        gateway_token: gatewayToken,
+        region: FLY_REGION,
+        status: 'running',
+      })
 
       logger.info('Instance record updated', { instanceId })
 
@@ -356,9 +333,6 @@ export const provisionAgentMachine = task({
         region: FLY_REGION,
       }
     } catch (err) {
-      // Log but do NOT set status='error' here — onFailure handles that
-      // after all retries are exhausted. Setting error here causes the
-      // frontend poller to give up before retries can succeed.
       logger.error('Provisioning attempt failed (will retry)', {
         instanceId,
         error: err instanceof Error ? err.message : String(err),

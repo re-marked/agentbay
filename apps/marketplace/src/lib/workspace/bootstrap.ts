@@ -1,5 +1,4 @@
-import { Members, Channels, Agents } from '@agentbay/db/primitives'
-import { createServiceClient } from '@agentbay/db/server'
+import { Members, Channels, Agents, Corporations } from '@agentbay/db/primitives'
 
 /**
  * Ensure workspace primitives exist for a project.
@@ -62,15 +61,7 @@ export async function ensureWorkspaceBootstrapped(
 
   if (instances.length > 0) {
     // Detect co-founder instance for rank assignment
-    // (corporations table isn't a primitive yet — use service client for this one query)
-    const service = createServiceClient()
-    const { data: corp } = await service
-      .from('corporations')
-      .select('co_founder_instance_id')
-      .eq('user_id', userId)
-      .limit(1)
-      .maybeSingle()
-    const coFounderInstanceId = corp?.co_founder_instance_id ?? null
+    const coFounderInstanceId = await Corporations.getCoFounderInstanceId(userId)
 
     // Get existing agent members to avoid re-creating
     const existingAgentMembers = await Members.listActive(projectId, { type: 'agent' })

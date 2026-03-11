@@ -1,5 +1,5 @@
 import { schedules, tasks as triggerTasks, logger } from '@trigger.dev/sdk/v3'
-import { createServiceClient } from '@agentbay/db'
+import { Agents, Members } from '@agentbay/db/primitives'
 import { FlyClient } from '@agentbay/fly'
 
 /**
@@ -15,17 +15,13 @@ export const healthCheckMachines = schedules.task({
   maxDuration: 120,
 
   run: async () => {
-    const db = createServiceClient()
     const fly = new FlyClient()
 
     // Fetch all instances that might need attention
     // Exclude 'provisioning' (in progress) to avoid double-provision
-    const { data: instances } = await db
-      .from('agent_instances')
-      .select('id, fly_app_name, fly_machine_id, gateway_token, status, user_id, agent_id, display_name')
-      .in('status', ['running', 'suspended', 'stopped', 'error', 'destroyed'])
+    const instances = await Agents.listByStatus(['running', 'suspended', 'stopped', 'error', 'destroyed'])
 
-    if (!instances?.length) {
+    if (!instances.length) {
       logger.info('No instances to check')
       return
     }
@@ -53,14 +49,12 @@ export const healthCheckMachines = schedules.task({
                 : machineState === 'suspended' ? 'suspended'
                 : 'error'
 
-              await db.from('agent_instances')
-                .update({ status: newStatus })
-                .eq('id', inst.id)
+              await Agents.updateInstance(inst.id, { status: newStatus })
 
               logger.warn(`Instance ${inst.id} was "running" but Fly says ${machineState}`)
 
               if (newStatus === 'destroyed' || newStatus === 'stopped') {
-                await autoReprovision(db, inst)
+                await autoReprovision(inst)
               }
 
               return { id: inst.id, action: 'state-synced', to: newStatus }
@@ -101,21 +95,19 @@ export const healthCheckMachines = schedules.task({
           if (inst.status === 'stopped' && inst.fly_app_name && inst.fly_machine_id) {
             try {
               await fly.startMachine(inst.fly_app_name, inst.fly_machine_id)
-              await db.from('agent_instances')
-                .update({ status: 'running' })
-                .eq('id', inst.id)
+              await Agents.updateInstance(inst.id, { status: 'running' })
               logger.info(`Restarted stopped instance ${inst.id}`)
               return { id: inst.id, action: 'restarted' }
             } catch (err) {
               logger.warn('Failed to restart stopped instance', { error: String(err) })
-              await autoReprovision(db, inst)
+              await autoReprovision(inst)
               return { id: inst.id, action: 'reprovision-after-restart-fail' }
             }
           }
 
           // ── Destroyed/Error: auto-re-provision ──
           if (inst.status === 'destroyed' || inst.status === 'error') {
-            await autoReprovision(db, inst)
+            await autoReprovision(inst)
             return { id: inst.id, action: 'reprovision-triggered' }
           }
 
@@ -125,9 +117,7 @@ export const healthCheckMachines = schedules.task({
               const machine = await fly.getMachine(inst.fly_app_name, inst.fly_machine_id)
               if (machine.state !== 'suspended') {
                 const newStatus = machine.state === 'started' ? 'running' : machine.state
-                await db.from('agent_instances')
-                  .update({ status: newStatus })
-                  .eq('id', inst.id)
+                await Agents.updateInstance(inst.id, { status: newStatus })
                 return { id: inst.id, action: 'state-synced', to: newStatus }
               }
             } catch {
@@ -156,22 +146,13 @@ export const healthCheckMachines = schedules.task({
  * Detects co-founder by display_name, finds member for project context.
  */
 async function autoReprovision(
-  db: ReturnType<typeof createServiceClient>,
   inst: { id: string; user_id: string; agent_id: string; display_name?: string | null },
 ): Promise<void> {
   const isCoFounder = inst.display_name === 'Personal AI'
 
-  const { data: member } = await db
-    .from('members')
-    .select('id, project_id')
-    .eq('instance_id', inst.id)
-    .neq('status', 'archived')
-    .limit(1)
-    .maybeSingle()
+  const member = await Members.findByInstanceId(inst.id)
 
-  await db.from('agent_instances')
-    .update({ status: 'provisioning' })
-    .eq('id', inst.id)
+  await Agents.updateInstance(inst.id, { status: 'provisioning' })
 
   try {
     await triggerTasks.trigger('provision-agent-machine', {
@@ -185,8 +166,6 @@ async function autoReprovision(
     logger.info(`Auto-reprovision triggered for ${inst.id}`, { isCoFounder })
   } catch (err) {
     logger.error('Failed to trigger auto-reprovision', { instanceId: inst.id, error: String(err) })
-    await db.from('agent_instances')
-      .update({ status: 'error' })
-      .eq('id', inst.id)
+    await Agents.updateInstance(inst.id, { status: 'error' })
   }
 }
