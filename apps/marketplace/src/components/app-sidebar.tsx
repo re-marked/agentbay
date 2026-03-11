@@ -25,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -33,7 +34,7 @@ import { AgentAvatar } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
 import { CreateTeamDialog } from "@/components/create-team-dialog"
-import { archiveChannel } from "@/lib/workspace/channel-actions"
+import { archiveChannel, createTeamChannel } from "@/lib/workspace/channel-actions"
 import { archiveTeam } from "@/lib/workspace/team-actions"
 
 interface AgentInfo {
@@ -386,12 +387,10 @@ function ChannelItem({
   channel,
   pathname,
   unreadCount,
-  isTeamChannel = false,
 }: {
   channel: BroadcastChannelInfo
   pathname: string
   unreadCount: number
-  isTeamChannel?: boolean
 }) {
   const chPath = `/workspace/c/${channel.id}`
   const isActive = pathname.startsWith(chPath)
@@ -414,30 +413,28 @@ function ChannelItem({
           )}
         </Link>
       </SidebarMenuButton>
-      {!isTeamChannel && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuAction showOnHover>
-              <MoreHorizontal />
-            </SidebarMenuAction>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="right" align="start">
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => {
-                if (confirm(`Delete #${channel.name}? This cannot be undone.`)) {
-                  archiveChannel(channel.id).then(() => {
-                    if (pathname.startsWith(chPath)) router.push('/workspace/home')
-                  })
-                }
-              }}
-            >
-              <Trash2 className="size-4" />
-              Delete Channel
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuAction showOnHover>
+            <MoreHorizontal />
+          </SidebarMenuAction>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start">
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              if (confirm(`Delete #${channel.name}? This cannot be undone.`)) {
+                archiveChannel(channel.id).then(() => {
+                  if (pathname.startsWith(chPath)) router.push('/workspace/home')
+                })
+              }
+            }}
+          >
+            <Trash2 className="size-4" />
+            Delete Channel
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </SidebarMenuItem>
   )
 }
@@ -483,9 +480,23 @@ function TeamCategory({
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start">
             <DropdownMenuItem
+              onClick={() => {
+                const name = prompt('Channel name:')
+                if (name?.trim()) {
+                  createTeamChannel(team.id, name.trim()).then((result) => {
+                    router.push(`/workspace/c/${result.channelId}`)
+                  })
+                }
+              }}
+            >
+              <Plus className="size-4" />
+              Create Channel
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
               variant="destructive"
               onClick={() => {
-                if (confirm(`Delete team "${team.name}"? This will archive the team, its channels, and destroy the team leader agent.`)) {
+                if (confirm(`Delete team "${team.name}"? This will archive the team and all its channels.`)) {
                   archiveTeam(team.id).then(() => {
                     if (isViewingTeam) router.push('/workspace/home')
                   })
@@ -506,7 +517,6 @@ function TeamCategory({
                   channel={ch}
                   pathname={pathname}
                   unreadCount={unreadCounts[ch.id] ?? 0}
-                  isTeamChannel
                 />
               ))}
               {team.channels.length === 0 && (
