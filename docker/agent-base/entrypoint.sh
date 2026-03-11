@@ -1,15 +1,23 @@
 #!/bin/sh
 # AgentBay agent entrypoint
-# Seed config + workspace on first boot only; always refresh auth-profiles from env
+# First boot: full config setup (openclaw.json, providers, models, workspace, identity)
+# Every boot: refresh auth-profiles (keys may rotate), clear stale sessions, validate
 
 mkdir -p /data/workspace /data/memory /data/sessions
 
-# ── 1. Seed openclaw.json on first boot only (never overwrite user edits)
-if [ ! -f /data/openclaw.json ]; then
-  echo "[entrypoint] First boot — seeding openclaw.json"
-  cp /opt/openclaw-defaults/openclaw.json /data/openclaw.json
+# ═══════════════════════════════════════════════════════════════════════
+# FIRST BOOT ONLY — runs once on agent hire/creation, never again
+# ═══════════════════════════════════════════════════════════════════════
+if [ ! -f /data/.initialized ]; then
+  echo "[entrypoint] First boot — full setup"
 
-  # Apply provisioner overrides (model, sandbox, etc.) on first boot
+  # ── 1. Seed openclaw.json ─────────────────────────────────────────
+  if [ ! -f /data/openclaw.json ]; then
+    cp /opt/openclaw-defaults/openclaw.json /data/openclaw.json
+    echo "[entrypoint] Seeded openclaw.json"
+  fi
+
+  # ── 2. Apply provisioner overrides (model, sandbox, etc.) ─────────
   if [ -n "$AGENT_OPENCLAW_OVERRIDES" ]; then
     node -e "\
       const fs = require('fs');\
@@ -25,16 +33,8 @@ if [ ! -f /data/openclaw.json ]; then
       fs.writeFileSync('/data/openclaw.json', JSON.stringify(merge(base, over), null, 2));\
     "
   fi
-else
-  echo "[entrypoint] Existing openclaw.json found — preserving user config"
-fi
 
-# ── 1b. Strip/fix problematic keys in OpenClaw v2026.2.25
-#   - tools.elevated.autoApprove: deprecated, crashes newer versions
-#   - tools.elevated.enabled: must be false — gateway can't handle approval requests
-#   - agents.defaults.elevatedDefault: remove to avoid elevated mode
-#   - agents.defaults.subagents: causes gateway init hang, corrupts volume state
-if [ -f /data/openclaw.json ]; then
+  # ── 3. Strip problematic config keys ──────────────────────────────
   node -e "\
     const fs = require('fs');\
     const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));\
@@ -57,79 +57,70 @@ if [ -f /data/openclaw.json ]; then
     }\
     if (changed) {\
       fs.writeFileSync('/data/openclaw.json', JSON.stringify(cfg, null, 2));\
-      console.log('[entrypoint] Fixed problematic config keys in openclaw.json');\
+      console.log('[entrypoint] Fixed problematic config keys');\
     }\
   "
-fi
 
-# ── 1c. Migrate deprecated model names on existing volumes
-if [ -f /data/openclaw.json ] && grep -q '"gemini-2.0-flash"' /data/openclaw.json; then
-  sed -i 's/gemini-2.0-flash/gemini-2.5-flash/g' /data/openclaw.json
-  echo "[entrypoint] Migrated model from gemini-2.0-flash → gemini-2.5-flash"
-fi
+  # ── 4. Migrate deprecated model names ─────────────────────────────
+  if grep -q '"gemini-2.0-flash"' /data/openclaw.json; then
+    sed -i 's/gemini-2.0-flash/gemini-2.5-flash/g' /data/openclaw.json
+    echo "[entrypoint] Migrated model gemini-2.0-flash → gemini-2.5-flash"
+  fi
 
-# ── 1d. Always ensure Routeway provider is registered (on every boot so existing volumes get it)
-# Uses custom 'routeway' provider with openai-completions API format.
-# Auth resolves via openai:routeway profile (provider: 'openai' + baseUrl override).
-# Model format: routeway/{model-id} (e.g. routeway/claude-sonnet-4.6)
-if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
-  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/claude-sonnet-4.6}"
-  node -e "\
-    const fs = require('fs');\
-    const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));\
-    let changed = false;\
-    \
-    cfg.models = cfg.models || {};\
-    cfg.models.mode = 'merge';\
-    cfg.models.providers = cfg.models.providers || {};\
-    \
-    /* Remove stale openai override if it points to Routeway (migration from earlier bug) */\
-    if (cfg.models.providers.openai?.baseUrl?.includes('routeway')) {\
-      delete cfg.models.providers.openai;\
-      changed = true;\
-      console.log('[entrypoint] Removed openai provider override (was pointing to Routeway)');\
-    }\
-    \
-    /* Always overwrite routeway provider to keep models + api format fresh */\
-    cfg.models.providers.routeway = {\
-      baseUrl: 'https://api.routeway.ai/v1',\
-      apiKey: '\${ROUTEWAY_API_KEY}',\
-      api: 'openai-completions',\
-      models: [\
-        { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },\
-        { id: 'gpt-5', name: 'GPT-5' },\
-        { id: 'gpt-5-mini', name: 'GPT-5 Mini' },\
-        { id: 'gpt-5.1', name: 'GPT-5.1' },\
-        { id: 'minimax-m2.5', name: 'MiniMax M2.5' }\
-      ]\
-    };\
-    changed = true;\
-    \
-    /* Migrate model refs from openai/ to routeway/ (undo previous migration) */\
-    const primary = cfg.agents?.defaults?.model?.primary ?? '';\
-    if (primary.startsWith('openai/') && !primary.includes('gpt-4')) {\
-      cfg.agents.defaults.model.primary = primary.replace('openai/', 'routeway/');\
-      console.log('[entrypoint] Migrated model prefix openai/ -> routeway/');\
-    }\
-    \
-    const noByok = !process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY;\
-    const current = cfg.agents?.defaults?.model?.primary ?? '';\
-    if (noByok && current !== process.env.ROUTEWAY_MODEL) {\
-      cfg.agents = cfg.agents || {};\
-      cfg.agents.defaults = cfg.agents.defaults || {};\
-      cfg.agents.defaults.model = cfg.agents.defaults.model || {};\
-      cfg.agents.defaults.model.primary = process.env.ROUTEWAY_MODEL;\
-      console.log('[entrypoint] Routeway-only: set model to', process.env.ROUTEWAY_MODEL);\
-    }\
-    \
-    if (changed) fs.writeFileSync('/data/openclaw.json', JSON.stringify(cfg, null, 2));\
-  "
-fi
+  # ── 5. Register Routeway provider + set default model ─────────────
+  if [ -n "$ROUTEWAY_API_KEY" ]; then
+    export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/claude-sonnet-4.6}"
+    node -e "\
+      const fs = require('fs');\
+      const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));\
+      \
+      cfg.models = cfg.models || {};\
+      cfg.models.mode = 'merge';\
+      cfg.models.providers = cfg.models.providers || {};\
+      \
+      /* Remove stale openai override if it points to Routeway (migration from earlier bug) */\
+      if (cfg.models.providers.openai?.baseUrl?.includes('routeway')) {\
+        delete cfg.models.providers.openai;\
+        console.log('[entrypoint] Removed stale openai provider override');\
+      }\
+      \
+      /* Register routeway custom provider with openai-completions API */\
+      cfg.models.providers.routeway = {\
+        baseUrl: 'https://api.routeway.ai/v1',\
+        apiKey: '\${ROUTEWAY_API_KEY}',\
+        api: 'openai-completions',\
+        models: [\
+          { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },\
+          { id: 'gpt-5', name: 'GPT-5' },\
+          { id: 'gpt-5-mini', name: 'GPT-5 Mini' },\
+          { id: 'gpt-5.1', name: 'GPT-5.1' },\
+          { id: 'minimax-m2.5', name: 'MiniMax M2.5' }\
+        ]\
+      };\
+      \
+      /* Migrate model refs from openai/ to routeway/ */\
+      const primary = cfg.agents?.defaults?.model?.primary ?? '';\
+      if (primary.startsWith('openai/') && !primary.includes('gpt-4')) {\
+        cfg.agents.defaults.model.primary = primary.replace('openai/', 'routeway/');\
+        console.log('[entrypoint] Migrated model prefix openai/ -> routeway/');\
+      }\
+      \
+      /* If no BYOK keys, ensure model is set to Routeway */\
+      const noByok = !process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY;\
+      const current = cfg.agents?.defaults?.model?.primary ?? '';\
+      if (noByok && current !== process.env.ROUTEWAY_MODEL) {\
+        cfg.agents = cfg.agents || {};\
+        cfg.agents.defaults = cfg.agents.defaults || {};\
+        cfg.agents.defaults.model = cfg.agents.defaults.model || {};\
+        cfg.agents.defaults.model.primary = process.env.ROUTEWAY_MODEL;\
+        console.log('[entrypoint] Set model to', process.env.ROUTEWAY_MODEL);\
+      }\
+      \
+      fs.writeFileSync('/data/openclaw.json', JSON.stringify(cfg, null, 2));\
+    "
+  fi
 
-# ── 1e. Configure model fallbacks from all available providers ──
-# OpenClaw tries fallbacks[] in order when the primary model fails.
-# Rebuilt on every boot so new keys/providers take effect immediately.
-if [ -f /data/openclaw.json ]; then
+  # ── 6. Configure model fallbacks ──────────────────────────────────
   node <<'FALLBACK_EOF'
 const fs = require('fs');
 const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));
@@ -157,49 +148,25 @@ if (fallbacks.length > 0) {
   cfg.agents.defaults.model.fallbacks = fallbacks;
   fs.writeFileSync('/data/openclaw.json', JSON.stringify(cfg, null, 2));
   console.log('[entrypoint] Model fallbacks:', fallbacks.join(', '));
-} else {
-  console.log('[entrypoint] No additional providers for fallbacks');
 }
 FALLBACK_EOF
-fi
 
-# ── 2. Seed workspace files — full copy on first boot, missing-files-only on subsequent boots
-if [ -z "$(ls -A /data/workspace 2>/dev/null)" ]; then
-  cp -r /opt/openclaw-defaults/workspace/. /data/workspace/ 2>/dev/null || true
-else
-  # Copy any new default files that don't yet exist on the volume (won't overwrite user edits)
-  for src in /opt/openclaw-defaults/workspace/*; do
-    fname="$(basename "$src")"
-    dest="/data/workspace/$fname"
-    if [ ! -e "$dest" ]; then
-      cp -r "$src" "$dest" 2>/dev/null || true
-      echo "[entrypoint] Added new workspace file: $fname"
-    fi
-  done
-fi
+  # ── 7. Seed workspace files ───────────────────────────────────────
+  if [ -z "$(ls -A /data/workspace 2>/dev/null)" ]; then
+    cp -r /opt/openclaw-defaults/workspace/. /data/workspace/ 2>/dev/null || true
+  fi
 
-# ── 3. Role overrides (sub-agents + co-founder) — only on first boot
-if [ -n "$AGENT_SOUL_MD" ] && [ ! -f /data/.initialized ]; then
-  printf '%s' "$AGENT_SOUL_MD" > /data/workspace/SOUL.md
-fi
-if [ -n "$AGENT_YAML" ] && [ ! -f /data/.initialized ]; then
-  printf '%s' "$AGENT_YAML" > /data/workspace/AGENT.yaml
-fi
-if [ -n "$AGENT_WHOAMI_MD" ] && [ ! -f /data/.initialized ]; then
-  printf '%s' "$AGENT_WHOAMI_MD" > /data/workspace/WHOAMI.md
-fi
-if [ -n "$AGENT_WHEREAMI_MD" ] && [ ! -f /data/.initialized ]; then
-  printf '%s' "$AGENT_WHEREAMI_MD" > /data/workspace/WHEREAMI.md
-fi
+  # ── 8. Write agent identity (SOUL.md, WHOAMI.md, etc.) ────────────
+  [ -n "$AGENT_SOUL_MD" ] && printf '%s' "$AGENT_SOUL_MD" > /data/workspace/SOUL.md
+  [ -n "$AGENT_YAML" ] && printf '%s' "$AGENT_YAML" > /data/workspace/AGENT.yaml
+  [ -n "$AGENT_WHOAMI_MD" ] && printf '%s' "$AGENT_WHOAMI_MD" > /data/workspace/WHOAMI.md
+  [ -n "$AGENT_WHEREAMI_MD" ] && printf '%s' "$AGENT_WHEREAMI_MD" > /data/workspace/WHEREAMI.md
 
-# ── 3b. Inject workspace tools reference into AGENTS.md (once, idempotent)
-# OpenClaw auto-loads AGENTS.md as system instructions. Without this, agents
-# won't know about workspace-msg / workspace-task CLI tools.
-if [ -n "$SUPABASE_URL" ]; then
-  # Create AGENTS.md if it doesn't exist yet (OpenClaw creates it on first run, but we need it now)
-  [ -f /data/workspace/AGENTS.md ] || touch /data/workspace/AGENTS.md
-  if ! grep -q "Workspace Tools" /data/workspace/AGENTS.md; then
-    cat >> /data/workspace/AGENTS.md <<'TOOLS_EOF'
+  # ── 9. Inject workspace tools reference into AGENTS.md ────────────
+  if [ -n "$SUPABASE_URL" ]; then
+    [ -f /data/workspace/AGENTS.md ] || touch /data/workspace/AGENTS.md
+    if ! grep -q "Workspace Tools" /data/workspace/AGENTS.md; then
+      cat >> /data/workspace/AGENTS.md <<'TOOLS_EOF'
 
 ## Workspace Tools
 
@@ -221,21 +188,41 @@ Quick reference:
 - workspace-channel members CHANNEL_ID - list channel members
 - workspace-channel who - list all members in the project
 TOOLS_EOF
-    echo "[entrypoint] Injected workspace tools reference into AGENTS.md"
+      echo "[entrypoint] Injected workspace tools into AGENTS.md"
+    fi
   fi
+
+  # Mark first boot complete — everything above never runs again
+  touch /data/.initialized
+  echo "[entrypoint] First boot complete"
+
+else
+  echo "[entrypoint] Existing agent — preserving config and identity"
 fi
 
-# ── 4. Normalize Google key name for OpenClaw compatibility
+# ═══════════════════════════════════════════════════════════════════════
+# EVERY BOOT — only auth refresh, validation, and session cleanup
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── A. Seed new workspace defaults that didn't exist before ─────────
+# (e.g. new image adds WORKSPACE-TOOLS.md — copy it if agent doesn't have it)
+if [ -d /opt/openclaw-defaults/workspace ]; then
+  for src in /opt/openclaw-defaults/workspace/*; do
+    fname="$(basename "$src")"
+    dest="/data/workspace/$fname"
+    if [ ! -e "$dest" ]; then
+      cp -r "$src" "$dest" 2>/dev/null || true
+      echo "[entrypoint] Added new workspace file: $fname"
+    fi
+  done
+fi
+
+# ── B. Normalize Google key name ────────────────────────────────────
 if [ -n "$GOOGLE_API_KEY" ] && [ -z "$GEMINI_API_KEY" ]; then
   export GEMINI_API_KEY="$GOOGLE_API_KEY"
 fi
 
-# ── 5. Write auth-profiles.json from env vars (always refresh — keys may change)
-# OpenClaw does NOT read API keys from env vars — it reads them from
-# /data/agents/main/agent/auth-profiles.json. We must generate this file
-# from the env vars that the provisioning task passes to the machine.
-# Format: version 1, provider:name keys, 'key' field (not 'apiKey').
-# Breaking change in OpenClaw 2026.2.19 (Issue #21448).
+# ── C. Write auth-profiles.json (always — keys may rotate) ─────────
 AUTH_DIR="/data/agents/main/agent"
 AUTH_FILE="$AUTH_DIR/auth-profiles.json"
 mkdir -p "$AUTH_DIR"
@@ -251,16 +238,13 @@ node -e "\
   }\
   if (Object.keys(profiles).length > 0) {\
     fs.writeFileSync('$AUTH_FILE', JSON.stringify({ version: 1, profiles }, null, 2));\
-    console.log('auth-profiles.json written with providers:', Object.keys(profiles).join(', '));\
+    console.log('[entrypoint] auth-profiles.json:', Object.keys(profiles).join(', '));\
   } else {\
-    console.warn('WARNING: No API keys found in env vars — auth-profiles.json not written');\
+    console.warn('[WARN] No API keys — auth-profiles.json not written');\
   }\
 "
 
-# Mark first boot complete
-touch /data/.initialized
-
-# ── 6. Validate configuration — fail fast if agent can't work ──
+# ── D. Validate configuration ──────────────────────────────────────
 if [ ! -f "$AUTH_FILE" ]; then
   echo "[FATAL] auth-profiles.json not created — no API keys available"
   exit 1
@@ -268,15 +252,12 @@ fi
 
 PROFILE_COUNT=$(node -e "const p=JSON.parse(require('fs').readFileSync('$AUTH_FILE')).profiles;console.log(Object.keys(p).length)")
 if [ "$PROFILE_COUNT" = "0" ]; then
-  echo "[FATAL] auth-profiles.json has zero profiles — agent cannot process requests"
+  echo "[FATAL] auth-profiles.json has zero profiles"
   exit 1
 fi
 echo "[entrypoint] Validated: $PROFILE_COUNT auth profile(s)"
 
-# ── 7. Clear stale sessions on every boot ──
-# Sessions cache model/provider config. After model changes or key rotation,
-# stale sessions cause phantom errors. Workspace tools provide all persistent
-# context — session history is expendable.
+# ── E. Clear stale sessions ────────────────────────────────────────
 if [ -d /data/agents/main/sessions ]; then
   rm -f /data/agents/main/sessions/sessions.json 2>/dev/null
   echo "[entrypoint] Cleared stale sessions"
