@@ -87,18 +87,24 @@ export async function send(
   content: string,
   opts?: SendMessageOpts
 ): Promise<string> {
+  const row: Record<string, unknown> = {
+    channel_id: channelId,
+    sender_id: senderId,
+    content,
+    message_kind: opts?.kind ?? 'text',
+    depth: opts?.depth ?? 0,
+    parent_id: opts?.parentId ?? null,
+    origin_id: opts?.originId ?? null,
+  }
+
+  // Only include metadata when provided — column is NOT NULL DEFAULT '{}'
+  if (opts?.metadata) {
+    row.metadata = opts.metadata
+  }
+
   const { data, error } = await db()
     .from('channel_messages')
-    .insert({
-      channel_id: channelId,
-      sender_id: senderId,
-      content,
-      message_kind: opts?.kind ?? 'text',
-      depth: opts?.depth ?? 0,
-      parent_id: opts?.parentId ?? null,
-      origin_id: opts?.originId ?? null,
-      metadata: (opts?.metadata ?? null) as any,
-    })
+    .insert(row as any)
     .select('id')
     .single()
 

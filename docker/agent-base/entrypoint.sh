@@ -71,7 +71,7 @@ fi
 # ── 1d. Always ensure Routeway provider is registered (on every boot so existing volumes get it)
 # Also migrates model to routeway/gpt-5 when machine has only Routeway key.
 if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
-  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/gpt-5}"
+  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/claude-sonnet-4-6}"
   node -e "\
     const fs = require('fs');\
     const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));\
@@ -85,18 +85,18 @@ if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
         baseUrl: 'https://api.routeway.ai/v1',\
         apiKey: '\${ROUTEWAY_API_KEY}',\
         api: 'openai-responses',\
-        models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' }, { id: 'gpt-5', name: 'GPT-5' }, { id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
+        models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' }, { id: 'gpt-5.1', name: 'GPT-5.1' }, { id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
       };\
       changed = true;\
       console.log('[entrypoint] Registered routeway provider in openclaw.json');\
     } else {\
       const rw = cfg.models.providers.routeway;\
       const ids = (rw.models || []).map(m => m.id);\
-      if (!ids.includes('gpt-5')) {\
+      if (!ids.includes('gpt-5.1')) {\
         rw.models = rw.models || [];\
-        rw.models.unshift({ id: 'gpt-5', name: 'GPT-5' });\
+        rw.models.unshift({ id: 'gpt-5.1', name: 'GPT-5.1' });\
         changed = true;\
-        console.log('[entrypoint] Added gpt-5 to existing routeway provider');\
+        console.log('[entrypoint] Added gpt-5.1 to existing routeway provider');\
       }\
     }\
     \
@@ -126,7 +126,7 @@ const primary = cfg.agents?.defaults?.model?.primary ?? '';
 const fallbacks = [];
 
 if (process.env.ROUTEWAY_API_KEY) {
-  if (primary !== 'routeway/gpt-5') fallbacks.push('routeway/gpt-5');
+  if (primary !== 'routeway/gpt-5.1') fallbacks.push('routeway/gpt-5.1');
   if (primary !== 'routeway/gpt-5-mini') fallbacks.push('routeway/gpt-5-mini');
 }
 if (process.env.GEMINI_API_KEY) {

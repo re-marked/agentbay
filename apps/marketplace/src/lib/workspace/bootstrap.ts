@@ -69,9 +69,21 @@ export async function ensureWorkspaceBootstrapped(
       existingAgentMembers.map(m => m.instance_id).filter(Boolean)
     )
 
-    // Create members for instances that don't have one yet
+    // Create members for instances that don't have one yet, and ensure
+    // existing agent members are in broadcast channels (fixes partial hire failures)
     for (const inst of instances) {
-      if (existingInstanceIds.has(inst.id)) continue
+      if (existingInstanceIds.has(inst.id)) {
+        // Agent member exists — ensure it's in broadcast channels (idempotent)
+        const member = existingAgentMembers.find(m => m.instance_id === inst.id)
+        if (member) {
+          try {
+            await Channels.joinBroadcasts(projectId, member.id)
+          } catch {
+            // Best effort
+          }
+        }
+        continue
+      }
 
       const agentName = inst.display_name ?? (inst.agents as any)?.name ?? 'Agent'
       const rank = inst.id === coFounderInstanceId ? 'master' : 'worker'

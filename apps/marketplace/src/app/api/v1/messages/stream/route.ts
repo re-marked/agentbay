@@ -78,7 +78,12 @@ export async function POST(request: Request) {
       depth: threadId ? 1 : 0,
       parentId: threadId,
     })
-  } catch {
+  } catch (err) {
+    console.error('[v1/messages/stream] Failed to save message:', err, {
+      channelId,
+      senderId: userMember.id,
+      contentLength: content.length,
+    })
     return new Response(JSON.stringify({ error: 'Failed to save message' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
