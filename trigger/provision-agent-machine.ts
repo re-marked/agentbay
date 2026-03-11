@@ -8,7 +8,7 @@ import { generateTeamLeaderRole } from './team-leader-role'
 
 // Hardcoded — do NOT use env var, Trigger.dev cloud env gets stale.
 // Bump this when you push a new image. Never use :latest (Fly doesn't pull fresh).
-const BASE_IMAGE = 'registry.fly.io/agentbay-agent-base:v2026.3.15-dev'
+const BASE_IMAGE = 'registry.fly.io/agentbay-agent-base:v2026.3.16-dev'
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? 'personal'
 const FLY_REGION = process.env.FLY_REGION ?? 'ord'
 
@@ -124,7 +124,7 @@ export const provisionAgentMachine = task({
       // If user has explicitly set a default model, use it; otherwise Routeway is primary
       // (Google models are poor at agentic tool use — Routeway models are much better)
       const userDefaultModel = (userRow as { default_model: string } | null)?.default_model
-      const defaultModel = userDefaultModel ?? 'routeway/claude-sonnet-4-6'
+      const defaultModel = userDefaultModel ?? 'routeway/claude-sonnet-4.6'
 
       const keyEnv: Record<string, string> = {}
       for (const row of apiKeys ?? []) {

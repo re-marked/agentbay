@@ -69,9 +69,11 @@ if [ -f /data/openclaw.json ] && grep -q '"gemini-2.0-flash"' /data/openclaw.jso
 fi
 
 # ── 1d. Always ensure Routeway provider is registered (on every boot so existing volumes get it)
-# Also migrates model to routeway/gpt-5 when machine has only Routeway key.
+# Uses custom 'routeway' provider with openai-completions API format.
+# Auth resolves via openai:routeway profile (provider: 'openai' + baseUrl override).
+# Model format: routeway/{model-id} (e.g. routeway/claude-sonnet-4.6)
 if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
-  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/claude-sonnet-4-6}"
+  export ROUTEWAY_MODEL="${PLATFORM_ROUTEWAY_DEFAULT_MODEL:-routeway/claude-sonnet-4.6}"
   node -e "\
     const fs = require('fs');\
     const cfg = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));\
@@ -80,24 +82,34 @@ if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
     cfg.models = cfg.models || {};\
     cfg.models.mode = 'merge';\
     cfg.models.providers = cfg.models.providers || {};\
-    if (!cfg.models.providers.routeway) {\
-      cfg.models.providers.routeway = {\
-        baseUrl: 'https://api.routeway.ai/v1',\
-        apiKey: '\${ROUTEWAY_API_KEY}',\
-        api: 'openai-responses',\
-        models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' }, { id: 'gpt-5.1', name: 'GPT-5.1' }, { id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
-      };\
+    \
+    /* Remove stale openai override if it points to Routeway (migration from earlier bug) */\
+    if (cfg.models.providers.openai?.baseUrl?.includes('routeway')) {\
+      delete cfg.models.providers.openai;\
       changed = true;\
-      console.log('[entrypoint] Registered routeway provider in openclaw.json');\
-    } else {\
-      const rw = cfg.models.providers.routeway;\
-      const ids = (rw.models || []).map(m => m.id);\
-      if (!ids.includes('gpt-5.1')) {\
-        rw.models = rw.models || [];\
-        rw.models.unshift({ id: 'gpt-5.1', name: 'GPT-5.1' });\
-        changed = true;\
-        console.log('[entrypoint] Added gpt-5.1 to existing routeway provider');\
-      }\
+      console.log('[entrypoint] Removed openai provider override (was pointing to Routeway)');\
+    }\
+    \
+    /* Always overwrite routeway provider to keep models + api format fresh */\
+    cfg.models.providers.routeway = {\
+      baseUrl: 'https://api.routeway.ai/v1',\
+      apiKey: '\${ROUTEWAY_API_KEY}',\
+      api: 'openai-completions',\
+      models: [\
+        { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },\
+        { id: 'gpt-5', name: 'GPT-5' },\
+        { id: 'gpt-5-mini', name: 'GPT-5 Mini' },\
+        { id: 'gpt-5.1', name: 'GPT-5.1' },\
+        { id: 'minimax-m2.5', name: 'MiniMax M2.5' }\
+      ]\
+    };\
+    changed = true;\
+    \
+    /* Migrate model refs from openai/ to routeway/ (undo previous migration) */\
+    const primary = cfg.agents?.defaults?.model?.primary ?? '';\
+    if (primary.startsWith('openai/') && !primary.includes('gpt-4')) {\
+      cfg.agents.defaults.model.primary = primary.replace('openai/', 'routeway/');\
+      console.log('[entrypoint] Migrated model prefix openai/ -> routeway/');\
     }\
     \
     const noByok = !process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY;\
@@ -107,7 +119,6 @@ if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
       cfg.agents.defaults = cfg.agents.defaults || {};\
       cfg.agents.defaults.model = cfg.agents.defaults.model || {};\
       cfg.agents.defaults.model.primary = process.env.ROUTEWAY_MODEL;\
-      changed = true;\
       console.log('[entrypoint] Routeway-only: set model to', process.env.ROUTEWAY_MODEL);\
     }\
     \
