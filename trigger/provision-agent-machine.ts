@@ -216,6 +216,7 @@ export const provisionAgentMachine = task({
         roleEnv.AGENT_WHOAMI_MD = teamLeaderRole.whoami
         roleEnv.AGENT_WHEREAMI_MD = teamLeaderRole.whereami
         roleEnv.AGENT_YAML = teamLeaderRole.agentYaml
+        if (teamId) roleEnv.AGENT_TEAM_ID = teamId
       } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml

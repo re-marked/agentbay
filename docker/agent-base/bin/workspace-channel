@@ -65,11 +65,13 @@ case "${1:-}" in
     KIND="team"
     DESC=""
     MEMBERS=""
+    TEAM_ID="${AGENT_TEAM_ID:-}"
     while [ $# -gt 0 ]; do
       case "$1" in
         --kind)        KIND="$2"; shift 2 ;;
         --description) DESC="$2"; shift 2 ;;
         --members)     MEMBERS="$2"; shift 2 ;;
+        --team)        TEAM_ID="$2"; shift 2 ;;
         *)             NAME="$1"; shift ;;
       esac
     done
@@ -98,6 +100,9 @@ case "${1:-}" in
     if [ -n "$DESC" ]; then
       BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
     fi
+    if [ -n "$TEAM_ID" ] && [ "$KIND" = "team" ]; then
+      BODY="$BODY,\"team_id\":\"$TEAM_ID\""
+    fi
     BODY="$BODY}"
 
     RESULT=$(sb POST "${REST}/channels" \
@@ -111,16 +116,28 @@ case "${1:-}" in
       exit 1
     fi
 
-    # Add creator as member
+    # Add creator (agent) as member
     sb POST "${REST}/channel_members" \
       -H "Content-Type: application/json" \
+      -H "Prefer: resolution=ignore-duplicates" \
       -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1 || true
+
+    # Add the project owner (user) as member — they must see all channels
+    OWNER_ID=$(curl -s "${REST}/members?project_id=eq.${AGENT_PROJECT_ID}&rank=eq.owner&select=id&limit=1" \
+      -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+    if [ -n "$OWNER_ID" ] && [ "$OWNER_ID" != "$AGENT_MEMBER_ID" ]; then
+      sb POST "${REST}/channel_members" \
+        -H "Content-Type: application/json" \
+        -H "Prefer: resolution=ignore-duplicates" \
+        -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$OWNER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1 || true
+    fi
 
     # Add additional members
     if [ -n "$MEMBERS" ]; then
       for MID in $(echo "$MEMBERS" | tr ',' ' '); do
         sb POST "${REST}/channel_members" \
           -H "Content-Type: application/json" \
+          -H "Prefer: resolution=ignore-duplicates" \
           -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$MID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
       done
     fi
