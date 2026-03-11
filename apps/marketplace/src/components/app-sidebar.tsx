@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState } from "react"
-import { Home, Settings, Plus, BarChart3, Key, Sparkles, CompassIcon, Hash, ListTodo, ChevronRight, Users, Crown, MoreHorizontal, Trash2 } from "lucide-react"
+import { Home, Settings, Plus, BarChart3, Key, Sparkles, CompassIcon, Hash, ListTodo, ChevronRight, Users, MoreHorizontal, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 
@@ -52,18 +52,10 @@ interface BroadcastChannelInfo {
   description: string | null
 }
 
-export interface TeamLeaderInfo {
-  memberId: string
-  displayName: string
-  instanceId: string | null
-  status: string
-}
-
 export interface TeamInfo {
   id: string
   name: string
   description: string | null
-  leader: TeamLeaderInfo | null
   channels: BroadcastChannelInfo[]
 }
 
@@ -467,12 +459,8 @@ function TeamCategory({
   // Check if any channel in this team has unread messages
   const teamHasUnread = team.channels.some(ch => (unreadCounts[ch.id] ?? 0) > 0)
 
-  const leader = team.leader
-  const leaderDmPath = leader?.instanceId ? `/workspace/dm/${leader.instanceId}` : null
-
   // Check if user is currently viewing a page belonging to this team
   const isViewingTeam = team.channels.some(ch => pathname.startsWith(`/workspace/c/${ch.id}`))
-    || (leaderDmPath && pathname.startsWith(leaderDmPath))
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
@@ -512,39 +500,6 @@ function TeamCategory({
         <CollapsibleContent>
           <SidebarGroupContent>
             <SidebarMenu>
-              {/* Team leader */}
-              {leader && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild={!!leaderDmPath}
-                    isActive={!!leaderDmPath && pathname.startsWith(leaderDmPath)}
-                    className="gap-2.5"
-                  >
-                    {leaderDmPath ? (
-                      <Link href={leaderDmPath}>
-                        <span className="relative flex shrink-0">
-                          <span className="flex size-5 items-center justify-center rounded-full bg-primary/20 text-primary">
-                            <Crown className="size-3" />
-                          </span>
-                          <span className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-sidebar ${STATUS_DOT[leader.status] ?? "bg-zinc-400"}`} />
-                        </span>
-                        <span className="truncate">{leader.displayName}</span>
-                      </Link>
-                    ) : (
-                      <>
-                        <span className="relative flex shrink-0">
-                          <span className="flex size-5 items-center justify-center rounded-full bg-primary/20 text-primary">
-                            <Crown className="size-3" />
-                          </span>
-                          <span className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-sidebar ${STATUS_DOT[leader.status] ?? "bg-zinc-400"}`} />
-                        </span>
-                        <span className="truncate">{leader.displayName}</span>
-                      </>
-                    )}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-
               {team.channels.map((ch) => (
                 <ChannelItem
                   key={ch.id}
@@ -554,7 +509,7 @@ function TeamCategory({
                   isTeamChannel
                 />
               ))}
-              {team.channels.length === 0 && !leader && (
+              {team.channels.length === 0 && (
                 <SidebarMenuItem>
                   <span className="px-2 py-1 text-xs text-muted-foreground/50">
                     No channels
