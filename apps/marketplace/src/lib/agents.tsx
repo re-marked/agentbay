@@ -7,11 +7,13 @@ import {
   Briefcase,
   Palette,
   Heart,
+  Shield,
   type LucideIcon,
 } from "lucide-react"
 
 export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   all: Sparkles,
+  system: Shield,
   productivity: Rocket,
   research: Search,
   writing: PenTool,
@@ -23,6 +25,7 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
 
 export const CATEGORIES = [
   { id: "all", label: "All" },
+  { id: "system", label: "System" },
   { id: "productivity", label: "Productivity" },
   { id: "research", label: "Research" },
   { id: "writing", label: "Writing" },
@@ -32,7 +35,10 @@ export const CATEGORIES = [
   { id: "personal", label: "Personal" },
 ] as const
 
+export const SYSTEM_AGENT_SLUGS = ['personal-ai', 'team-leader'] as const
+
 export const CATEGORY_COLORS: Record<string, string> = {
+  system: "bg-indigo-500/15 text-indigo-400",
   productivity: "bg-primary/15 text-primary",
   research: "bg-emerald-500/15 text-emerald-400",
   writing: "bg-purple-500/15 text-purple-400",
@@ -44,6 +50,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
 }
 
 const CATEGORY_GRADIENT: Record<string, string> = {
+  system: "from-indigo-500 to-indigo-600",
   productivity: "from-primary to-primary/80",
   research: "from-emerald-500 to-emerald-600",
   writing: "from-purple-500 to-purple-600",
