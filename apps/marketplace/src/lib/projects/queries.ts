@@ -1,6 +1,7 @@
 import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@agentbay/db/server'
+import { Agents } from '@agentbay/db/primitives'
 import { ensureWorkspaceBootstrapped } from '@/lib/workspace/bootstrap'
 import { ensureCoFounderHired } from '@/lib/workspace/co-founder'
 
@@ -142,21 +143,11 @@ export const getActiveProjectId = cache(async function getActiveProjectId(userId
 })
 
 /**
- * Load agent instances for the user.
- * Queries agent_instances directly by user_id.
+ * Load agent instances for the user via the Agents primitive.
  */
 export const getProjectAgents = cache(async function getProjectAgents(userId: string, _activeProjectId: string | null) {
-  const service = createServiceClient()
-
-  const { data: instances } = await service
-    .from('agent_instances')
-    .select('id, display_name, status, created_at, agents!inner(name, slug, category, tagline, icon_url)')
-    .eq('user_id', userId)
-    .not('status', 'in', '("destroyed","destroying")')
-    .order('created_at', { ascending: false })
-
-  if (!instances || instances.length === 0) return []
-
+  const instances = await Agents.listInstances(userId)
+  if (instances.length === 0) return []
   return instances as unknown as ProjectAgentInstance[]
 })
 

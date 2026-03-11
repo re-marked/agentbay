@@ -167,13 +167,14 @@ export async function updateInstance(instanceId: string, updates: Record<string,
     .eq('id', instanceId)
 }
 
-/** List instances for a user (excluding destroyed). */
+/** List instances for a user (excluding destroyed). Includes agent catalog info. */
 export async function listInstances(userId: string) {
   const { data } = await db()
     .from('agent_instances')
-    .select('id, display_name, status, fly_app_name, gateway_token, agent_id, team_id, agents!inner(name, slug, icon_url)')
+    .select('id, display_name, status, fly_app_name, gateway_token, agent_id, team_id, created_at, agents!inner(name, slug, category, tagline, icon_url)')
     .eq('user_id', userId)
     .not('status', 'in', '("destroyed","destroying")')
+    .order('created_at', { ascending: false })
 
   return data ?? []
 }
