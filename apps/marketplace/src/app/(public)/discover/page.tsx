@@ -6,6 +6,7 @@ import { DiscoverContent } from "@/components/discover-content"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SYSTEM_AGENT_SLUGS, type AgentListItem } from "@/lib/agents"
+import { seedDemoAgentsIfEmpty } from "@/lib/agents-seed"
 
 interface Props {
   searchParams: Promise<{ q?: string; category?: string; sort?: string }>
@@ -36,11 +37,12 @@ async function fetchSystemAgents(): Promise<AgentListItem[]> {
   if (!data) return []
 
   // Keep stable order: co-founder first, team leader second
+  // Override category to "system" regardless of DB value
   const bySlug = new Map(data.map(a => [a.slug, a]))
   return SYSTEM_AGENT_SLUGS
     .map(slug => bySlug.get(slug))
     .filter(Boolean)
-    .map(a => toListItem(a!))
+    .map(a => toListItem({ ...a!, category: 'system' }))
 }
 
 async function fetchAgents(searchParams: {
@@ -106,6 +108,10 @@ async function fetchAgents(searchParams: {
 
 export default async function DiscoverPage({ searchParams }: Props) {
   const [user, params] = await Promise.all([getUser(), searchParams])
+
+  // Ensure system + demo agents exist in DB
+  await seedDemoAgentsIfEmpty()
+
   const [systemAgents, agents] = await Promise.all([
     fetchSystemAgents(),
     fetchAgents(params),
