@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@agentbay/db/server'
+import { Channels, Messages } from '@agentbay/db/primitives'
 import { authenticateAgent } from '@/lib/auth/service-key'
 
 /**
@@ -18,39 +18,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'channelId and content are required' }, { status: 400 })
   }
 
-  const db = createServiceClient()
-
   // Verify the agent is a member of this channel
-  const { data: membership } = await db
-    .from('channel_members')
-    .select('id')
-    .eq('channel_id', channelId)
-    .eq('member_id', auth.memberId)
-    .single()
-
-  if (!membership) {
+  const isMember = await Channels.isMember(channelId, auth.memberId)
+  if (!isMember) {
     return NextResponse.json({ error: 'Not a member of this channel' }, { status: 403 })
   }
 
-  const { data: message, error } = await db
-    .from('channel_messages')
-    .insert({
-      channel_id: channelId,
-      sender_id: auth.memberId,
-      content,
-      message_kind: messageKind,
+  try {
+    const messageId = await Messages.send(channelId, auth.memberId, content, {
+      kind: messageKind,
       depth: parentId ? 1 : 0,
-      parent_id: parentId ?? null,
-      origin_id: parentId ?? null,
+      parentId: parentId ?? undefined,
+      originId: parentId ?? undefined,
     })
-    .select('id, created_at')
-    .single()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ id: messageId, createdAt: new Date().toISOString() })
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to send' }, { status: 500 })
   }
-
-  return NextResponse.json({ id: message.id, createdAt: message.created_at })
 }
 
 export async function GET(req: NextRequest) {
@@ -64,41 +49,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'channelId query param is required' }, { status: 400 })
   }
 
-  const db = createServiceClient()
-
   // Verify the agent is a member of this channel
-  const { data: membership } = await db
-    .from('channel_members')
-    .select('id')
-    .eq('channel_id', channelId)
-    .eq('member_id', auth.memberId)
-    .single()
-
-  if (!membership) {
+  const isMember = await Channels.isMember(channelId, auth.memberId)
+  if (!isMember) {
     return NextResponse.json({ error: 'Not a member of this channel' }, { status: 403 })
   }
 
-  const { data: messages, error } = await db
-    .from('channel_messages')
-    .select('id, sender_id, content, message_kind, created_at, members!sender_id(display_name, instance_id)')
-    .eq('channel_id', channelId)
-    .order('created_at', { ascending: false })
-    .limit(limit)
+  // Use Messages.list — returns chronological order
+  const messages = await Messages.list(channelId, { limit })
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  // Return newest-last for natural reading order
-  const reversed = (messages ?? []).reverse().map((m: any) => ({
+  // The primitive returns raw rows; map to API shape
+  // Note: sender name/type require member lookups. For now, return IDs.
+  // TODO: Add a Messages.listWithSenders primitive if agents need sender info.
+  const result = messages.map((m: any) => ({
     id: m.id,
     senderId: m.sender_id,
-    senderName: m.members?.display_name ?? 'Unknown',
-    senderType: m.members?.instance_id ? 'agent' : 'user',
     content: m.content,
     kind: m.message_kind,
     createdAt: m.created_at,
   }))
 
-  return NextResponse.json({ messages: reversed })
+  return NextResponse.json({ messages: result })
 }

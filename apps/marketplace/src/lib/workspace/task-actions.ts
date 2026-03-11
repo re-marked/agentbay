@@ -2,8 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { getUser } from '@/lib/auth/get-user'
-import { createServiceClient } from '@agentbay/db/server'
 import { getActiveProjectId } from '@/lib/projects/queries'
+import { Tasks } from '@agentbay/db/primitives'
 import { announceAndDispatchTask, dispatchTaskToAssignee } from './task-dispatch'
 
 export async function createTask(data: {
@@ -18,24 +18,18 @@ export async function createTask(data: {
   const { activeProjectId, userMemberId } = await getActiveProjectId(user.id)
   if (!activeProjectId || !userMemberId) throw new Error('No active project')
 
-  const db = createServiceClient()
-
   // 1. Insert task
-  const { data: task, error } = await db.from('tasks').insert({
-    project_id: activeProjectId,
+  const taskId = await Tasks.create(activeProjectId, {
     title: data.title,
     description: data.description ?? null,
     priority: data.priority ?? 'normal',
-    status: data.assignedTo ? 'assigned' : 'pending',
-    assigned_to: data.assignedTo ?? null,
-    created_by: userMemberId,
-  }).select('id').single()
-
-  if (error || !task) throw new Error(error?.message ?? 'Failed to create task')
+    assignedTo: data.assignedTo ?? null,
+    createdBy: userMemberId,
+  })
 
   // 2. Announce in #tasks + dispatch to assignee
-  await announceAndDispatchTask(db, activeProjectId, {
-    id: task.id,
+  await announceAndDispatchTask(activeProjectId, {
+    id: taskId,
     title: data.title,
     description: data.description ?? null,
     priority: data.priority ?? 'normal',
@@ -63,47 +57,18 @@ export async function updateTask(
   const { activeProjectId, userMemberId } = await getActiveProjectId(user.id)
   if (!activeProjectId || !userMemberId) throw new Error('No active project')
 
-  const db = createServiceClient()
-
-  const allowed: Record<string, unknown> = {}
-  if (updates.title !== undefined) allowed.title = updates.title
-  if (updates.description !== undefined) allowed.description = updates.description
-  if (updates.status !== undefined) {
-    allowed.status = updates.status
-    if (updates.status === 'in_progress') {
-      allowed.started_at = new Date().toISOString()
-    }
-    if (updates.status === 'completed' || updates.status === 'failed' || updates.status === 'cancelled') {
-      allowed.completed_at = new Date().toISOString()
-    }
-  }
-  if (updates.priority !== undefined) allowed.priority = updates.priority
-  if (updates.assignedTo !== undefined) {
-    allowed.assigned_to = updates.assignedTo
-    // If assigning and status is pending, auto-advance to assigned
-    if (updates.assignedTo && !updates.status) {
-      allowed.status = 'assigned'
-    }
-  }
-  if (updates.dueAt !== undefined) allowed.due_at = updates.dueAt
-
-  if (Object.keys(allowed).length === 0) return
-
-  const { error } = await db
-    .from('tasks')
-    .update(allowed)
-    .eq('id', taskId)
-    .eq('project_id', activeProjectId)
-
-  if (error) throw new Error(error.message)
+  await Tasks.update(taskId, {
+    title: updates.title,
+    description: updates.description,
+    status: updates.status,
+    priority: updates.priority,
+    assignedTo: updates.assignedTo,
+    dueAt: updates.dueAt,
+  })
 
   // If assignee changed, announce + dispatch
   if (updates.assignedTo) {
-    const { data: task } = await db
-      .from('tasks')
-      .select('title, description, priority, channel_id, metadata')
-      .eq('id', taskId)
-      .single()
+    const task = await Tasks.findById(taskId)
 
     if (task) {
       const metadata = (task.metadata ?? {}) as Record<string, unknown>
@@ -113,7 +78,6 @@ export async function updateTask(
       if (threadRootId && channelId) {
         // Already has thread → just dispatch to new assignee
         await dispatchTaskToAssignee(
-          db,
           updates.assignedTo,
           taskId,
           task.title,
@@ -124,7 +88,7 @@ export async function updateTask(
         )
       } else {
         // No thread yet → full announce + dispatch
-        await announceAndDispatchTask(db, activeProjectId, {
+        await announceAndDispatchTask(activeProjectId, {
           id: taskId,
           title: task.title,
           description: task.description,
@@ -146,15 +110,7 @@ export async function deleteTask(taskId: string) {
   const { activeProjectId } = await getActiveProjectId(user.id)
   if (!activeProjectId) throw new Error('No active project')
 
-  const db = createServiceClient()
-
-  const { error } = await db
-    .from('tasks')
-    .delete()
-    .eq('id', taskId)
-    .eq('project_id', activeProjectId)
-
-  if (error) throw new Error(error.message)
+  await Tasks.remove(taskId, activeProjectId)
 
   revalidatePath('/workspace/tasks')
 }

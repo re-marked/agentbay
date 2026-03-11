@@ -281,7 +281,7 @@ export function OverviewSection({
             {isRunning && (
               <Button
                 size="sm"
-                onClick={() => router.push(`/workspace/agent/${instanceId}/chat`)}
+                onClick={() => router.push(`/workspace/dm/${instanceId}`)}
               >
                 <MessageSquare className="size-3.5 mr-1.5" />
                 Open Chat

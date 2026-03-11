@@ -1,7 +1,6 @@
 import { getUser } from '@/lib/auth/get-user'
-import { createServiceClient } from '@agentbay/db/server'
-import { getAgentConnectionInfo } from '@/lib/agents/dispatch'
 import { streamFromAgent } from '@/lib/agents/stream-dispatch'
+import { Members, Channels, Messages, Agents } from '@agentbay/db/primitives'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -43,15 +42,8 @@ export async function POST(request: Request) {
     })
   }
 
-  const service = createServiceClient()
-
-  // 1. Load channel and verify access
-  const { data: channel } = await service
-    .from('channels')
-    .select('id, project_id, kind')
-    .eq('id', channelId)
-    .single()
-
+  // 1. Load channel and verify it exists
+  const channel = await Channels.findById(channelId)
   if (!channel) {
     return new Response(JSON.stringify({ error: 'Channel not found' }), {
       status: 404,
@@ -59,16 +51,8 @@ export async function POST(request: Request) {
     })
   }
 
-  // 2. Find user's member ID
-  const { data: userMember } = await service
-    .from('members')
-    .select('id')
-    .eq('project_id', channel.project_id)
-    .eq('user_id', user.id)
-    .neq('status', 'archived')
-    .limit(1)
-    .single()
-
+  // 2. Find user's member record in this project
+  const userMember = await Members.findByUser(channel.project_id, user.id)
   if (!userMember) {
     return new Response(JSON.stringify({ error: 'Not a member of this project' }), {
       status: 403,
@@ -78,15 +62,8 @@ export async function POST(request: Request) {
 
   // 3. Verify channel membership (broadcast channels allow all project members)
   if (channel.kind !== 'broadcast') {
-    const { data: membership } = await service
-      .from('channel_members')
-      .select('id')
-      .eq('channel_id', channelId)
-      .eq('member_id', userMember.id)
-      .limit(1)
-      .maybeSingle()
-
-    if (!membership) {
+    const isMember = await Channels.isMember(channelId, userMember.id)
+    if (!isMember) {
       return new Response(JSON.stringify({ error: 'Not a member of this channel' }), {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
@@ -94,95 +71,22 @@ export async function POST(request: Request) {
     }
   }
 
-  // 4. Persist user message (with parent_id if in thread mode)
-  const { data: userMsg, error: msgErr } = await service
-    .from('channel_messages')
-    .insert({
-      channel_id: channelId,
-      sender_id: userMember.id,
-      content,
-      message_kind: 'text',
+  // 4. Persist user message
+  let userMsgId: string
+  try {
+    userMsgId = await Messages.send(channelId, userMember.id, content, {
       depth: threadId ? 1 : 0,
-      ...(threadId ? { parent_id: threadId } : {}),
+      parentId: threadId,
     })
-    .select('id')
-    .single()
-
-  if (msgErr || !userMsg) {
+  } catch {
     return new Response(JSON.stringify({ error: 'Failed to save message' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     })
   }
 
-  // 5. Find agent member — from instanceId hint, task assignee (thread mode), or channel members (fallback)
-  let agentMember: { id: string; instance_id: string; display_name: string } | null = null
-
-  // Preferred: use the specific instanceId hint from the client (avoids picking wrong agent in multi-agent channels)
-  if (instanceId) {
-    const { data: targetMember } = await service
-      .from('members')
-      .select('id, instance_id, display_name')
-      .eq('instance_id', instanceId)
-      .neq('status', 'archived')
-      .limit(1)
-      .maybeSingle()
-
-    if (targetMember?.instance_id) {
-      agentMember = targetMember as { id: string; instance_id: string; display_name: string }
-    }
-  }
-
-  if (!agentMember && taskId) {
-    // In task thread mode, resolve agent from the task's assignee
-    const { data: taskRow } = await service
-      .from('tasks')
-      .select('assigned_to, assignee:members!tasks_assigned_to_fkey(id, instance_id, display_name)')
-      .eq('id', taskId)
-      .single()
-
-    if (taskRow?.assigned_to) {
-      const assignee = (taskRow as any).assignee as { id: string; instance_id: string | null; display_name: string } | null
-      if (assignee?.instance_id) {
-        agentMember = assignee as { id: string; instance_id: string; display_name: string }
-      }
-    }
-  }
-
-  if (!agentMember) {
-    // Fall back to finding agent in channel members — prefer running instances
-    const { data: channelMembers } = await service
-      .from('channel_members')
-      .select('member_id, members!inner(id, instance_id, display_name)')
-      .eq('channel_id', channelId)
-      .neq('member_id', userMember.id)
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const agentMemberships = channelMembers?.filter((cm: any) => cm.members?.instance_id != null) ?? []
-
-    if (agentMemberships.length > 0) {
-      // Check instance statuses and prefer a running one
-      const instanceIds = agentMemberships.map((cm: any) => cm.members.instance_id as string)
-      const { data: instances } = await service
-        .from('agent_instances')
-        .select('id, status')
-        .in('id', instanceIds)
-
-      const runningIds = new Set(instances?.filter(i => i.status === 'running').map(i => i.id))
-
-      // Pick running agent first, fall back to any agent
-      const runningMatch = agentMemberships.find((cm: any) => runningIds.has(cm.members.instance_id))
-      const match = runningMatch ?? agentMemberships[0]
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      agentMember = (match as any).members as {
-        id: string
-        instance_id: string
-        display_name: string
-      }
-    }
-  }
-
+  // 5. Resolve agent — 3-tier: instanceId hint → task assignee → channel members (prefer running)
+  const agentMember = await Agents.resolveAgentForChannel(channelId, userMember.id, { instanceId, taskId })
   if (!agentMember) {
     return new Response(JSON.stringify({ error: 'No agent found for this context' }), {
       status: 404,
@@ -191,24 +95,17 @@ export async function POST(request: Request) {
   }
 
   // 6. Mark agent as working
-  await service
-    .from('members')
-    .update({ status: 'working' })
-    .eq('id', agentMember.id)
+  await Members.updateStatus(agentMember.memberId, 'working')
 
   // 7. Get agent connection info
   let flyAppName: string
   let gatewayToken: string
   try {
-    const info = await getAgentConnectionInfo(agentMember.instance_id)
+    const info = await Agents.getConnectionInfo(agentMember.instanceId)
     flyAppName = info.flyAppName
     gatewayToken = info.gatewayToken
   } catch (err) {
-    // Mark agent idle on connection error
-    await service
-      .from('members')
-      .update({ status: 'idle' })
-      .eq('id', agentMember.id)
+    await Members.updateStatus(agentMember.memberId, 'idle')
 
     const encoder = new TextEncoder()
     const errorMsg = err instanceof Error ? err.message : 'Agent not available'
@@ -227,32 +124,13 @@ export async function POST(request: Request) {
     })
   }
 
-  // 8. Load recent history for context (newest 30, then reverse to chronological order)
-  // When in thread mode, scope history to the thread
-  let historyQuery = service
-    .from('channel_messages')
-    .select('content, sender_id, message_kind')
-    .eq('channel_id', channelId)
-    .eq('message_kind', 'text')
-    .order('created_at', { ascending: false })
-    .limit(30)
-
-  if (threadId) {
-    historyQuery = historyQuery.or(`id.eq.${threadId},parent_id.eq.${threadId}`)
-  }
-
-  const { data: history } = await historyQuery
-
-  const messages = (history ?? []).reverse().map(msg => ({
-    role: (msg.sender_id === userMember.id ? 'user' : 'assistant') as 'user' | 'assistant',
-    content: msg.content,
-  }))
+  // 8. Load recent history for context
+  const messages = await Messages.loadContext(channelId, userMember.id, { limit: 30, threadId })
 
   // 9. Stream from agent — tools persist as real messages, text persists on completion
   const persistedToolIds = new Set<string>()
 
-  // Stable session key: task-scoped when in task thread, otherwise channel-scoped.
-  // OpenClaw maintains conversation history per session key.
+  // Stable session key: task-scoped when in task thread, otherwise channel-scoped
   const sessionKey = taskId
     ? `agent:main:task-${taskId}`
     : `agent:main:dm-${channelId}`
@@ -263,23 +141,19 @@ export async function POST(request: Request) {
     messages,
     {
       async onToolEvent(tool) {
-        // Persist each tool as a separate channel_message (tool_result kind)
-        // Only persist on 'end' or 'error' — start events are ephemeral
         if (tool.state === 'end' || tool.state === 'error') {
-          if (persistedToolIds.has(tool.id)) return // dedup
+          if (persistedToolIds.has(tool.id)) return
           persistedToolIds.add(tool.id)
 
-          await service
-            .from('channel_messages')
-            .insert({
-              channel_id: channelId,
-              sender_id: agentMember.id,
-              content: `${tool.tool}${tool.args ? ` ${tool.args}` : ''}`,
-              message_kind: 'tool_result',
+          await Messages.send(
+            channelId,
+            agentMember.memberId,
+            `${tool.tool}${tool.args ? ` ${tool.args}` : ''}`,
+            {
+              kind: 'tool_result',
               depth: 1,
-              origin_id: userMsg.id,
-              parent_id: userMsg.id,
-              ...(threadId ? { parent_id: threadId } : {}),
+              originId: userMsgId,
+              parentId: threadId ?? userMsgId,
               metadata: {
                 id: tool.id,
                 tool: tool.tool,
@@ -288,32 +162,20 @@ export async function POST(request: Request) {
                 error: tool.error,
                 status: tool.state === 'end' ? 'done' : 'error',
               },
-            })
+            }
+          )
         }
       },
 
       async onComplete(result) {
-        // Persist the agent's text response (if any)
         if (result.content) {
-          await service
-            .from('channel_messages')
-            .insert({
-              channel_id: channelId,
-              sender_id: agentMember.id,
-              content: result.content,
-              message_kind: 'text',
-              depth: 1,
-              origin_id: userMsg.id,
-              parent_id: userMsg.id,
-              ...(threadId ? { parent_id: threadId } : {}),
-            })
+          await Messages.send(channelId, agentMember.memberId, result.content, {
+            depth: 1,
+            originId: userMsgId,
+            parentId: threadId ?? userMsgId,
+          })
         }
-
-        // Mark agent idle
-        await service
-          .from('members')
-          .update({ status: 'idle' })
-          .eq('id', agentMember.id)
+        await Members.updateStatus(agentMember.memberId, 'idle')
       },
     },
     request.signal,

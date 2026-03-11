@@ -1,4 +1,4 @@
-import { createServiceClient } from '@agentbay/db/server'
+import { Agents } from '@agentbay/db/primitives'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -51,18 +51,6 @@ export async function dispatchToAgent(
 
 /**
  * Load an agent's connection info from the DB.
+ * Thin wrapper around the primitive for backward compatibility.
  */
-export async function getAgentConnectionInfo(instanceId: string) {
-  const service = createServiceClient()
-  const { data } = await service
-    .from('agent_instances')
-    .select('fly_app_name, gateway_token, status')
-    .eq('id', instanceId)
-    .single()
-
-  if (!data) throw new Error(`Instance ${instanceId} not found`)
-  if (data.status !== 'running') throw new Error(`Agent is ${data.status}, not running`)
-  if (!data.fly_app_name || !data.gateway_token) throw new Error('Agent not provisioned')
-
-  return { flyAppName: data.fly_app_name, gatewayToken: data.gateway_token }
-}
+export const getAgentConnectionInfo = Agents.getConnectionInfo

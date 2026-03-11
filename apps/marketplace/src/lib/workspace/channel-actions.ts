@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@agentbay/db/server'
+import { Channels } from '@agentbay/db/primitives'
 import { getUser } from '@/lib/auth/get-user'
 import { getActiveProjectId } from '@/lib/projects/queries'
 
@@ -12,20 +13,10 @@ export async function archiveChannel(channelId: string) {
   const user = await getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const service = createServiceClient()
-
-  const { data: channel } = await service
-    .from('channels')
-    .select('id')
-    .eq('id', channelId)
-    .single()
-
+  const channel = await Channels.findById(channelId)
   if (!channel) throw new Error('Channel not found')
 
-  await service
-    .from('channels')
-    .update({ archived: true })
-    .eq('id', channelId)
+  await Channels.archive(channelId)
 
   revalidatePath('/workspace', 'layout')
 }
@@ -55,25 +46,15 @@ export async function createTeamChannel(teamId: string, name: string) {
 
   const channelName = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
 
-  const { data: channel, error } = await service
-    .from('channels')
-    .insert({
-      project_id: activeProjectId,
-      team_id: teamId,
-      name: channelName,
-      kind: 'team',
-    })
-    .select('id')
-    .single()
-
-  if (!channel) throw new Error(`Failed to create channel: ${error?.message}`)
+  // Create the team channel
+  const channelId = await Channels.create(activeProjectId, {
+    name: channelName,
+    kind: 'team',
+    teamId,
+  })
 
   // Add the creator
-  await service.from('channel_members').insert({
-    channel_id: channel.id,
-    member_id: userMemberId,
-    role: 'owner',
-  })
+  await Channels.addMember(channelId, userMemberId, 'owner')
 
   // Add all team members to the new channel
   const { data: teamMembers } = await service
@@ -83,16 +64,12 @@ export async function createTeamChannel(teamId: string, name: string) {
     .neq('member_id', userMemberId)
 
   if (teamMembers && teamMembers.length > 0) {
-    await service.from('channel_members').upsert(
-      teamMembers.map(m => ({
-        channel_id: channel.id,
-        member_id: m.member_id,
-        role: 'participant' as const,
-      })),
-      { onConflict: 'channel_id,member_id', ignoreDuplicates: true },
+    await Channels.addMembers(
+      channelId,
+      teamMembers.map(m => ({ memberId: m.member_id, role: 'participant' })),
     )
   }
 
   revalidatePath('/workspace', 'layout')
-  return { channelId: channel.id }
+  return { channelId }
 }

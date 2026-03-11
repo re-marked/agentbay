@@ -1,4 +1,5 @@
 import { createServiceClient } from '@agentbay/db/server'
+import { Agents, Channels, Messages } from '@agentbay/db/primitives'
 import { triggerProvision } from '@/lib/trigger'
 import {
   createAgentMember,
@@ -12,55 +13,6 @@ const TEAM_LEADER_GREETING = (teamName: string) =>
 I own the outcomes of this team. I'll coordinate work, assign tasks, track progress, remove blockers, and report back to you. When things go well, the team did it. When things go wrong, that's on me.
 
 What's the mission? Tell me what this team should be working on and I'll start organizing.`
-
-/**
- * Ensure a "team-leader" system agent definition exists in the agents table.
- * All team leaders share this one definition (different instances per team).
- * Idempotent — safe to call on every team creation.
- */
-async function ensureTeamLeaderAgent(creatorId: string): Promise<string> {
-  const service = createServiceClient()
-
-  const { data: existing } = await service
-    .from('agents')
-    .select('id')
-    .eq('slug', 'team-leader')
-    .maybeSingle()
-
-  if (existing) return existing.id
-
-  const { data: agent, error } = await service
-    .from('agents')
-    .insert({
-      slug: 'team-leader',
-      name: 'Team Leader',
-      tagline: 'Coordinates team work, assigns tasks, and reports to you',
-      description:
-        "Auto-created when you form a team. Owns the team's outcomes — assigns tasks, tracks progress, removes blockers, and keeps you informed.",
-      category: 'system',
-      icon_url: '👑',
-      status: 'published',
-      pricing_model: 'free',
-      creator_id: creatorId,
-      github_repo_url: 'https://github.com/agentbay/team-leader',
-      published_at: new Date().toISOString(),
-    })
-    .select('id')
-    .single()
-
-  // Race condition: another request created it between check and insert
-  if (error?.code === '23505') {
-    const { data: raced } = await service
-      .from('agents')
-      .select('id')
-      .eq('slug', 'team-leader')
-      .single()
-    if (raced) return raced.id
-  }
-
-  if (!agent) throw new Error(`Failed to create team-leader agent: ${error?.message}`)
-  return agent.id
-}
 
 interface HireTeamLeaderParams {
   userId: string
@@ -77,12 +29,13 @@ interface HireTeamLeaderParams {
  * Called automatically from createTeam().
  *
  * Creates:
- * 1. agent_instance (status=provisioning)
- * 2. member (rank=leader)
- * 3. Updates team.leader_member_id to the agent
- * 4. DM channel with greeting message
- * 5. Joins broadcast channels + own team channel
- * 6. Fires Trigger.dev provision task with isTeamLeader=true
+ * 1. agent definition (idempotent via Agents.createDef)
+ * 2. agent_instance (status=provisioning, cleans up destroyed first)
+ * 3. member (rank=leader)
+ * 4. Updates team.leader_member_id to the agent
+ * 5. DM channel with greeting message
+ * 6. Joins broadcast channels + own team channel
+ * 7. Fires Trigger.dev provision task with isTeamLeader=true
  */
 export async function hireTeamLeader({
   userId,
@@ -95,40 +48,29 @@ export async function hireTeamLeader({
 }: HireTeamLeaderParams): Promise<{ instanceId: string; memberId: string }> {
   const service = createServiceClient()
 
-  // 1. Ensure team-leader agent definition exists
-  const agentId = await ensureTeamLeaderAgent(userId)
+  // 1. Ensure team-leader agent definition exists (idempotent, race-safe)
+  const agentId = await Agents.createDef({
+    slug: 'team-leader',
+    name: 'Team Leader',
+    tagline: 'Coordinates team work, assigns tasks, and reports to you',
+    description:
+      "Auto-created when you form a team. Owns the team's outcomes — assigns tasks, tracks progress, removes blockers, and keeps you informed.",
+    category: 'system',
+    iconUrl: '👑',
+    creatorId: userId,
+  })
 
-  // 2. Clean up any destroyed team-leader instances for this team
-  await service
-    .from('agent_instances')
-    .delete()
-    .eq('user_id', userId)
-    .eq('agent_id', agentId)
-    .eq('team_id', teamId)
-    .in('status', ['destroyed', 'destroying'])
-
-  // 3. Create agent_instance (team_id scoped — allows one leader per team)
+  // 2. Create agent_instance (cleans up destroyed instances, race-safe)
   const displayName = `${teamName} Leader`
-  const { data: instance, error: instanceErr } = await service
-    .from('agent_instances')
-    .insert({
-      user_id: userId,
-      agent_id: agentId,
-      team_id: teamId,
-      display_name: displayName,
-      fly_app_name: 'pending',
-      fly_machine_id: 'pending',
-      status: 'provisioning',
-    })
-    .select('id')
-    .single()
-
-  if (!instance) throw new Error(`Failed to create team leader instance: ${instanceErr?.message}`)
+  const instanceId = await Agents.createInstance(userId, agentId, {
+    displayName,
+    teamId,
+  })
 
   // 3. Create workspace member (rank=leader)
   const { memberId } = await createAgentMember(
     projectId,
-    instance.id,
+    instanceId,
     displayName,
     'leader',
     userMemberId,
@@ -143,10 +85,7 @@ export async function hireTeamLeader({
       { team_id: teamId, member_id: memberId, role: 'leader' as const },
       { onConflict: 'team_id,member_id', ignoreDuplicates: true },
     ),
-    service.from('channel_members').upsert(
-      { channel_id: channelId, member_id: memberId, role: 'participant' as const },
-      { onConflict: 'channel_id,member_id', ignoreDuplicates: true },
-    ),
+    Channels.addMember(channelId, memberId, 'participant'),
   ])
 
   // 6. Create DM channel + seed greeting
@@ -157,13 +96,7 @@ export async function hireTeamLeader({
     displayName,
   )
 
-  await service.from('channel_messages').insert({
-    channel_id: dmChannelId,
-    sender_id: memberId,
-    content: TEAM_LEADER_GREETING(teamName),
-    message_kind: 'text',
-    depth: 0,
-  })
+  await Messages.send(dmChannelId, memberId, TEAM_LEADER_GREETING(teamName))
 
   // 7. Join broadcast channels
   await joinBroadcastChannels(projectId, memberId)
@@ -172,7 +105,7 @@ export async function hireTeamLeader({
   await triggerProvision({
     userId,
     agentId,
-    instanceId: instance.id,
+    instanceId,
     isTeamLeader: true,
     projectId,
     memberId,
@@ -181,5 +114,5 @@ export async function hireTeamLeader({
     teamDescription,
   })
 
-  return { instanceId: instance.id, memberId }
+  return { instanceId, memberId }
 }

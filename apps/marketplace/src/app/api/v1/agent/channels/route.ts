@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@agentbay/db/server'
+import { Channels } from '@agentbay/db/primitives'
 import { authenticateAgent } from '@/lib/auth/service-key'
 
 /**
@@ -12,23 +13,12 @@ export async function GET(req: NextRequest) {
   const auth = await authenticateAgent(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const db = createServiceClient()
+  const memberships = await Channels.getMemberChannels(auth.memberId)
 
-  const { data: memberships, error } = await db
-    .from('channel_members')
-    .select('channels!inner(id, name, kind, description, pinned, archived)')
-    .eq('member_id', auth.memberId)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  const channels = (memberships ?? []).map((m: any) => ({
+  const channels = memberships.map((m: any) => ({
     id: m.channels.id,
     name: m.channels.name,
     kind: m.channels.kind,
-    description: m.channels.description,
-    pinned: m.channels.pinned,
     archived: m.channels.archived,
   }))
 
@@ -55,33 +45,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `kind must be one of: ${validKinds.join(', ')}` }, { status: 400 })
   }
 
-  // Only master/leader can create broadcast channels
   if (kind === 'broadcast' && !['master', 'leader'].includes(auth.rank)) {
     return NextResponse.json({ error: 'Only master or leader can create broadcast channels' }, { status: 403 })
   }
 
-  const db = createServiceClient()
-
   // For broadcast/team channels, check if one with the same name already exists
   if (kind === 'broadcast' || kind === 'team') {
-    const { data: existing } = await db
-      .from('channels')
-      .select('id, name, kind, description')
-      .eq('project_id', auth.projectId)
-      .eq('name', name)
-      .eq('kind', kind)
-      .eq('archived', false)
-      .maybeSingle()
-
-    if (existing) {
-      // Ensure agent is a member, then return existing channel
-      await db
-        .from('channel_members')
-        .upsert(
-          { channel_id: existing.id, member_id: auth.memberId, role: 'participant' },
-          { onConflict: 'channel_id,member_id', ignoreDuplicates: true }
-        )
-      return NextResponse.json(existing, { status: 200 })
+    const existing = await Channels.findBroadcast(auth.projectId, name)
+    if (existing.length > 0) {
+      await Channels.addMember(existing[0].id, auth.memberId, 'participant')
+      return NextResponse.json(existing[0], { status: 200 })
     }
   }
 
@@ -91,72 +64,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Direct channels require exactly 1 other member' }, { status: 400 })
     }
 
-    // Find all DM channels this agent is in
-    const { data: myDms } = await db
-      .from('channel_members')
-      .select('channel_id, channels!inner(kind, project_id, archived)')
-      .eq('member_id', auth.memberId)
-
-    if (myDms) {
-      const dmChannelIds = myDms
-        .filter((m: any) =>
-          m.channels.kind === 'direct' &&
-          m.channels.project_id === auth.projectId &&
-          !m.channels.archived
-        )
-        .map((m: any) => m.channel_id)
-
-      if (dmChannelIds.length > 0) {
-        const { data: sharedDms } = await db
-          .from('channel_members')
-          .select('channel_id')
-          .eq('member_id', members[0])
-          .in('channel_id', dmChannelIds)
-
-        if (sharedDms && sharedDms.length > 0) {
-          return NextResponse.json({
-            error: 'A direct channel already exists between these members',
-            existingChannelId: sharedDms[0].channel_id,
-          }, { status: 409 })
-        }
-      }
+    const existingDM = await Channels.findDM(auth.projectId, auth.memberId, members[0])
+    if (existingDM) {
+      return NextResponse.json({
+        error: 'A direct channel already exists between these members',
+        existingChannelId: existingDM,
+      }, { status: 409 })
     }
   }
 
   // Create the channel
-  const { data: channel, error } = await db
-    .from('channels')
-    .insert({
-      project_id: auth.projectId,
-      name,
-      kind,
-      description: description ?? null,
-    })
-    .select('id, name, kind, description, created_at')
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  const channelId = await Channels.create(auth.projectId, {
+    name,
+    kind,
+    description,
+  })
 
   // Add creator as owner
-  await db.from('channel_members').insert({
-    channel_id: channel.id,
-    member_id: auth.memberId,
-    role: 'owner',
-  })
+  await Channels.addMember(channelId, auth.memberId, 'owner')
 
   // Add listed members as participants
   if (members.length > 0) {
-    const memberRows = members.map((memberId: string) => ({
-      channel_id: channel.id,
-      member_id: memberId,
-      role: 'participant' as const,
-    }))
-    await db.from('channel_members').insert(memberRows)
+    await Channels.addMembers(channelId, members.map((id: string) => ({ memberId: id })))
   }
 
-  return NextResponse.json(channel, { status: 201 })
+  return NextResponse.json({ id: channelId, name, kind, description: description ?? null }, { status: 201 })
 }
 
 export async function PATCH(req: NextRequest) {
@@ -170,36 +102,21 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'channelId is required' }, { status: 400 })
   }
 
-  const db = createServiceClient()
-
-  // Check the channel exists in this project
-  const { data: channel } = await db
-    .from('channels')
-    .select('id, kind, project_id')
-    .eq('id', channelId)
-    .eq('project_id', auth.projectId)
-    .single()
-
-  if (!channel) {
+  // Verify channel exists in this project
+  const channel = await Channels.findById(channelId)
+  if (!channel || channel.project_id !== auth.projectId) {
     return NextResponse.json({ error: 'Channel not found' }, { status: 404 })
   }
 
   // Check permission: must be channel owner OR master/leader rank
-  const { data: membership } = await db
-    .from('channel_members')
-    .select('role')
-    .eq('channel_id', channelId)
-    .eq('member_id', auth.memberId)
-    .single()
-
-  const isOwner = membership?.role === 'owner'
+  const isMember = await Channels.isMember(channelId, auth.memberId)
   const isPrivileged = ['master', 'leader'].includes(auth.rank)
 
-  if (!isOwner && !isPrivileged) {
+  if (!isMember && !isPrivileged) {
     return NextResponse.json({ error: 'Only channel owner or master/leader can update channels' }, { status: 403 })
   }
 
-  // Build allowed updates
+  // Build allowed updates (raw query — no update primitive for channels yet)
   const allowed: Record<string, unknown> = {}
   if (updates.name !== undefined) allowed.name = updates.name
   if (updates.description !== undefined) allowed.description = updates.description
@@ -210,6 +127,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
   }
 
+  const db = createServiceClient()
   const { data: updated, error } = await db
     .from('channels')
     .update(allowed)

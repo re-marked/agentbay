@@ -1,5 +1,5 @@
 import { tasks } from '@trigger.dev/sdk/v3'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { Tasks, Channels, Messages, Members, Agents } from '@agentbay/db/primitives'
 
 /**
  * Post a system message to #tasks and link it to the task.
@@ -7,69 +7,40 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  * Returns the message ID (thread root) or null if channel not found.
  */
 export async function announceTask(
-  db: SupabaseClient,
   projectId: string,
   taskId: string,
   senderMemberId: string,
   content: string,
 ): Promise<{ threadRootId: string; channelId: string } | null> {
   // Check if already announced
-  const { data: existing } = await db
-    .from('tasks')
-    .select('metadata')
-    .eq('id', taskId)
-    .single()
-
+  const existing = await Tasks.findById(taskId)
   const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
   if (existingMeta.thread_root_id) {
     // Already has a thread — return existing info
-    const { data: task } = await db
-      .from('tasks')
-      .select('channel_id')
-      .eq('id', taskId)
-      .single()
     return {
       threadRootId: existingMeta.thread_root_id as string,
-      channelId: task?.channel_id as string,
+      channelId: existing!.channel_id as string,
     }
   }
 
   // Find #tasks broadcast channel
-  const { data: tasksChannel } = await db
-    .from('channels')
-    .select('id')
-    .eq('project_id', projectId)
-    .eq('name', 'tasks')
-    .eq('kind', 'broadcast')
-    .maybeSingle()
-
+  const broadcastChannels = await Channels.findBroadcast(projectId, 'tasks')
+  const tasksChannel = broadcastChannels[0]
   if (!tasksChannel) return null
 
   // Post announcement message
-  const { data: msg } = await db
-    .from('channel_messages')
-    .insert({
-      channel_id: tasksChannel.id,
-      sender_id: senderMemberId,
-      content,
-      message_kind: 'system',
-      depth: 0,
-    })
-    .select('id')
-    .single()
-
-  if (!msg) return null
+  const msgId = await Messages.send(tasksChannel.id, senderMemberId, content, {
+    kind: 'system',
+    depth: 0,
+  })
 
   // Link task to channel and store the thread root message ID in metadata
-  await db
-    .from('tasks')
-    .update({
-      channel_id: tasksChannel.id,
-      metadata: { ...existingMeta, thread_root_id: msg.id },
-    })
-    .eq('id', taskId)
+  await Tasks.update(taskId, {
+    channelId: tasksChannel.id,
+    metadata: { ...existingMeta, thread_root_id: msgId },
+  })
 
-  return { threadRootId: msg.id, channelId: tasksChannel.id }
+  return { threadRootId: msgId, channelId: tasksChannel.id }
 }
 
 /**
@@ -77,7 +48,6 @@ export async function announceTask(
  * Resolves member → instance, verifies agent is running, triggers background task.
  */
 export async function dispatchTaskToAssignee(
-  db: SupabaseClient,
   memberId: string,
   taskId: string,
   title: string,
@@ -87,47 +57,29 @@ export async function dispatchTaskToAssignee(
   threadRootId: string,
 ): Promise<void> {
   // Resolve member → instance
-  const { data: member } = await db
-    .from('members')
-    .select('instance_id')
-    .eq('id', memberId)
-    .single()
-
-  if (!member?.instance_id) {
+  const instanceId = await Members.resolveInstance(memberId)
+  if (!instanceId) {
     console.log('[task-dispatch] dispatchTaskToAssignee: member has no instance_id', { memberId })
     return
   }
 
-  const { data: instance } = await db
-    .from('agent_instances')
-    .select('id, status')
-    .eq('id', member.instance_id)
-    .single()
-
+  const instance = await Agents.getInstance(instanceId)
   if (!instance || instance.status !== 'running') {
-    console.log('[task-dispatch] dispatchTaskToAssignee: agent not running', { instanceId: member.instance_id, status: instance?.status })
+    console.log('[task-dispatch] dispatchTaskToAssignee: agent not running', { instanceId, status: instance?.status })
     return
   }
 
   // Update last_dispatched_at in task metadata
-  const { data: task } = await db
-    .from('tasks')
-    .select('metadata')
-    .eq('id', taskId)
-    .single()
-
+  const task = await Tasks.findById(taskId)
   const metadata = (task?.metadata ?? {}) as Record<string, unknown>
-  await db
-    .from('tasks')
-    .update({
-      metadata: { ...metadata, last_dispatched_at: new Date().toISOString() },
-    })
-    .eq('id', taskId)
+  await Tasks.update(taskId, {
+    metadata: { ...metadata, last_dispatched_at: new Date().toISOString() },
+  })
 
   // Trigger the background dispatch task
   await tasks.trigger('dispatch-task-to-agent', {
     taskId,
-    instanceId: member.instance_id,
+    instanceId,
     agentMemberId: memberId,
     channelId,
     threadRootId,
@@ -143,7 +95,6 @@ export async function dispatchTaskToAssignee(
  *              agent tasks API POST, agent tasks API PATCH.
  */
 export async function announceAndDispatchTask(
-  db: SupabaseClient,
   projectId: string,
   task: {
     id: string
@@ -157,11 +108,7 @@ export async function announceAndDispatchTask(
   // Resolve assignee display name for announcement
   let assigneeName = ''
   if (task.assignedTo) {
-    const { data: assignee } = await db
-      .from('members')
-      .select('display_name')
-      .eq('id', task.assignedTo)
-      .single()
+    const assignee = await Members.findById(task.assignedTo)
     assigneeName = assignee?.display_name ?? 'someone'
   }
 
@@ -169,7 +116,7 @@ export async function announceAndDispatchTask(
     ? `📋 New task: **${task.title}** → @"${assigneeName}"${task.priority && task.priority !== 'normal' ? ` [${task.priority}]` : ''}`
     : `📋 New task: **${task.title}**${task.priority && task.priority !== 'normal' ? ` [${task.priority}]` : ''} (unassigned)`
 
-  const result = await announceTask(db, projectId, task.id, task.createdBy, announcement)
+  const result = await announceTask(projectId, task.id, task.createdBy, announcement)
   console.log('[task-dispatch] announceTask result:', result ? { channelId: result.channelId, threadRootId: result.threadRootId } : null)
 
   // Dispatch to assigned agent via Trigger.dev
@@ -177,7 +124,6 @@ export async function announceAndDispatchTask(
     console.log('[task-dispatch] dispatching to agent:', task.assignedTo)
     try {
       await dispatchTaskToAssignee(
-        db,
         task.assignedTo,
         task.id,
         task.title,
