@@ -127,10 +127,10 @@ export const provisionAgentMachine = task({
         .eq('id', userId)
         .single()
 
-      // If user has explicitly set a default model, use it; otherwise choose based on available keys.
-      // When only Routeway is configured, use a free Routeway model to avoid unexpected costs.
+      // If user has explicitly set a default model, use it; otherwise Routeway is primary
+      // (Google models are poor at agentic tool use — Routeway models are much better)
       const userDefaultModel = (userRow as { default_model: string } | null)?.default_model
-      const defaultModel = userDefaultModel ?? 'google/gemini-2.5-flash'
+      const defaultModel = userDefaultModel ?? 'routeway/claude-sonnet-4-6'
 
       const keyEnv: Record<string, string> = {}
       for (const row of apiKeys ?? []) {
@@ -142,16 +142,19 @@ export const provisionAgentMachine = task({
         if (row.provider === 'routeway') keyEnv.ROUTEWAY_API_KEY = row.api_key
       }
 
-      // Platform fallback: if user has no keys, use the platform Routeway key for free-tier access
-      // This lets new users get started immediately without configuring any API keys
-      if (Object.keys(keyEnv).length === 0) {
+      // Always include platform Routeway key — it's the primary provider for agentic usage.
+      // User's own Routeway key takes precedence if they have one.
+      if (!keyEnv.ROUTEWAY_API_KEY) {
         const platformRouteKey = process.env.PLATFORM_ROUTEWAY_API_KEY
         if (platformRouteKey) {
           keyEnv.ROUTEWAY_API_KEY = platformRouteKey
-          logger.info('Using platform Routeway key as fallback (user has no API keys configured)')
-        } else {
-          throw new Error('No API keys configured. Add at least one key in Settings.')
+          logger.info('Using platform Routeway key (user has no personal Routeway key)')
         }
+      }
+
+      // If no keys at all (not even platform Routeway), fail
+      if (Object.keys(keyEnv).length === 0) {
+        throw new Error('No API keys configured. Add at least one key in Settings.')
       }
 
       const image = agent.docker_image ?? BASE_IMAGE
@@ -239,13 +242,9 @@ export const provisionAgentMachine = task({
       if (process.env.SUPABASE_SERVICE_ROLE_KEY) roleEnv.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
       // Build OpenClaw config overrides to set the user's preferred model.
-      // When only Routeway is configured (no BYOK keys), default to a free tier model.
-      const isRouteOnlySetup = keyEnv.ROUTEWAY_API_KEY && !keyEnv.GEMINI_API_KEY && !keyEnv.OPENAI_API_KEY && !keyEnv.ANTHROPIC_API_KEY
-      const resolvedModel = isRouteOnlySetup && !userDefaultModel
-        ? (process.env.PLATFORM_ROUTEWAY_DEFAULT_MODEL ?? 'routeway/gpt-5')
-        : defaultModel
+      // Routeway is primary for agentic usage; Google/others are fallbacks.
       const modelOverrides = {
-        agents: { defaults: { model: { primary: resolvedModel }, sandbox: { mode: 'off' } } },
+        agents: { defaults: { model: { primary: defaultModel }, sandbox: { mode: 'off' } } },
       }
 
       // Merge role overrides (e.g. sandbox:off) with model overrides (user's preferred model).

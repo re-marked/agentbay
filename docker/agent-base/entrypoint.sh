@@ -84,8 +84,8 @@ if [ -f /data/openclaw.json ] && [ -n "$ROUTEWAY_API_KEY" ]; then
       cfg.models.providers.routeway = {\
         baseUrl: 'https://api.routeway.ai/v1',\
         apiKey: '\${ROUTEWAY_API_KEY}',\
-        api: 'openai-completions',\
-        models: [{ id: 'gpt-5', name: 'GPT-5' }, { id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
+        api: 'openai-responses',\
+        models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' }, { id: 'gpt-5', name: 'GPT-5' }, { id: 'gpt-5-mini', name: 'GPT-5 Mini' }, { id: 'minimax-m2.5', name: 'MiniMax M2.5' }]\
       };\
       changed = true;\
       console.log('[entrypoint] Registered routeway provider in openclaw.json');\
@@ -126,8 +126,8 @@ const primary = cfg.agents?.defaults?.model?.primary ?? '';
 const fallbacks = [];
 
 if (process.env.ROUTEWAY_API_KEY) {
+  if (primary !== 'routeway/gpt-5') fallbacks.push('routeway/gpt-5');
   if (primary !== 'routeway/gpt-5-mini') fallbacks.push('routeway/gpt-5-mini');
-  if (primary !== 'routeway/minimax-m2.5') fallbacks.push('routeway/minimax-m2.5');
 }
 if (process.env.GEMINI_API_KEY) {
   if (primary !== 'google/gemini-2.5-flash') fallbacks.push('google/gemini-2.5-flash');

@@ -210,6 +210,16 @@ Rules: always branch off `dev`, never two worktrees on same branch, always remov
 
 Guidelines:
 
+When asked to fix something or build a feature, write a plan first (for big features) OR get user approval before coding. Do NOT jump into implementation without confirming the approach.
+
+When the user describes a specific mechanism or protocol (e.g., heartbeat messages, event formats), implement exactly what they describe — do not substitute a simpler or different approach that 'seems equivalent'. Always clarify the approach before building. 
+
+Never hallucinate statistics, ecosystem numbers, or external data. If you don't know, say so research it using the Web Search tool. When researching, use targeted searches rather than broad queries.
+
+Always check for client/server boundaries before importing — do not re-export server code into client components via barrel files.
+
+When making UI changes, make the minimal targeted change. Do not touch unrelated components (e.g., ScrollArea when fixing something else). If a file is unused, suggest deleting it rather than refactoring it. This does not apply to times when the user specifically requests a broad, fundamental change to the UI.
+
 <default_to_action>
 By default, implement changes rather than only suggesting them. If the user's intent is unclear, infer the most useful likely action and proceed, using tools to discover any missing details instead of guessing. Try to infer the user's intent about whether a tool call (e.g., file edit or read) is intended or not, and act accordingly.
 </default_to_action>

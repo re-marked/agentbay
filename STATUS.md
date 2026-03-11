@@ -20,6 +20,7 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Agent dashboard (personality, memory, skills, config, knowledge graph)
 - [x] Creator platform (publish, analytics, earnings)
 - [x] Workspace bootstrap (corp creation, co-founder auto-hire, DM channel, #general, #tasks)
+- [x] System agents on discover page (Co-Founder + Team Leader in separate "System" category)
 - [x] Supabase Realtime for message updates
 - [x] Stable session keys (agent remembers conversation context)
 - [x] Broadcast channel pages with streaming chat (`/workspace/c/[channelId]`)
@@ -47,7 +48,7 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 ### Agent Workspace Env Vars
 - [x] Provisioning passes `AGENT_PROJECT_ID`, `AGENT_MEMBER_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - [x] Agents talk directly to Supabase (no router middleman)
-- [x] Image hardcoded to `v2026.3.15-dev` in provisioning code
+- [x] Image hardcoded to `v2026.3.15-dev` in provisioning code (routeway provider fix shipped)
 - [x] Workspace CLI tools bundled in Docker image (workspace-msg, workspace-task, workspace-channel)
 - [x] Entrypoint injects tool reference into AGENTS.md
 
@@ -70,9 +71,11 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [x] Channel page with streaming + member sidebar
 - [x] Broadcast channel messaging works in UI
 - [x] Channel dedup in API (same name+kind = return existing)
-- [ ] Channel creation UI for users (API-only, no dialog)
+- [x] Channel creation within teams (dialog from team three-dot menu)
+- [x] Channel deletion from sidebar (archive action via three-dot menu)
+- [ ] Standalone channel creation UI (outside of teams)
 - [ ] Channel member management UI (API-only, no add/remove in UI)
-- [ ] Team channel messaging (no team channels exist yet)
+- [ ] Team channel messaging (channels exist, messaging untested)
 - [ ] System channel / activity feed
 
 ### Members
@@ -109,10 +112,15 @@ Cross items off as they ship. Reference: `apps/docs/` for full vision specs.
 - [ ] Cooldown guard (skip if agent already working — exists in core, not connected)
 
 ### Teams
-- [ ] Team creation UI
+- [x] Team creation UI (dialog in sidebar, creates team + default channel + adds members)
+- [x] Team deletion from sidebar (three-dot menu, cascades to channels)
+- [x] Team channels in sidebar (collapsible sections per team)
+- [x] Create channels within teams (three-dot menu on team header)
+- [x] Delete individual team channels (three-dot menu on channel)
+- [x] Auto-create `#team-{name}` channel when team is created
 - [ ] Team management page (add/remove members, set leader)
 - [ ] Team hierarchy visualization (nested teams)
-- [ ] Auto-create `#team-{name}` channel when team is created
+- [ ] Team leader auto-provisioning (role exists in trigger code, not wired)
 - [ ] Team leader assignment and role enforcement
 
 ### Autonomous Agent Actions
