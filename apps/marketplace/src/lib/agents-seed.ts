@@ -249,15 +249,6 @@ export async function seedDemoAgentsIfEmpty() {
 
   const service = createServiceClient()
 
-  const { count, error: countError } = await service
-    .from("agents")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "published")
-
-  if (countError) return
-
-  if (count !== null && count >= DEMO_AGENTS.length) return
-
   // We need a creator_id — use the first user
   const { data: firstUser, error: userError } = await service
     .from("users")
@@ -269,7 +260,7 @@ export async function seedDemoAgentsIfEmpty() {
 
   const now = new Date().toISOString()
 
-  // System agents always get seeded (even in production)
+  // System agents always get upserted (ensures they exist + category stays "system")
   const systemAgents = SYSTEM_AGENTS.map((a) => ({
     ...a,
     creator_id: firstUser.id,
@@ -282,6 +273,15 @@ export async function seedDemoAgentsIfEmpty() {
   }))
 
   await service.from("agents").upsert(systemAgents, { onConflict: "slug" })
+
+  // Demo agents — only seed if table is mostly empty
+  const { count, error: countError } = await service
+    .from("agents")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "published")
+
+  if (countError) return
+  if (count !== null && count >= DEMO_AGENTS.length) return
 
   const agents = DEMO_AGENTS.map((a) => ({
     ...a,
