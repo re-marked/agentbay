@@ -25,7 +25,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { AgentAvatar, CATEGORY_COLORS, type AgentListItem } from "@/lib/agents"
+import { AgentAvatar, CATEGORY_COLORS, SYSTEM_AGENT_SLUGS, type AgentListItem } from "@/lib/agents"
 import { RatingStars } from "@/components/agent-card"
 import { hireAgent, checkInstanceStatus } from "@/lib/hire/actions"
 import type { User } from "@supabase/supabase-js"
@@ -188,24 +188,32 @@ export function AgentDetailSheet({ agent, open, onOpenChange, user }: AgentDetai
 
         {/* Deploy CTA */}
         <DrawerFooter className="sticky bottom-0 bg-sidebar/95 backdrop-blur-sm border-t border-border/40 p-8">
-          <Button
-            size="lg"
-            disabled={deploying}
-            onClick={handleDeploy}
-            className="w-full rounded-xl font-semibold text-base h-13"
-          >
-            {deploying ? (
-              <>
-                <Loader2 className="size-4 mr-2 animate-spin" />
-                Deploying...
-              </>
-            ) : (
-              <>
-                <Rocket className="size-4 mr-2" />
-                Deploy this Assistant
-              </>
-            )}
-          </Button>
+          {(SYSTEM_AGENT_SLUGS as readonly string[]).includes(agent.slug) ? (
+            <p className="text-center text-sm text-muted-foreground">
+              {agent.slug === 'personal-ai'
+                ? 'Your Co-Founder is created automatically when you set up your corporation.'
+                : 'Team Leaders are created automatically when you create a team.'}
+            </p>
+          ) : (
+            <Button
+              size="lg"
+              disabled={deploying}
+              onClick={handleDeploy}
+              className="w-full rounded-xl font-semibold text-base h-13"
+            >
+              {deploying ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Deploying...
+                </>
+              ) : (
+                <>
+                  <Rocket className="size-4 mr-2" />
+                  Deploy this Assistant
+                </>
+              )}
+            </Button>
+          )}
         </DrawerFooter>
       </DrawerContent>
 
