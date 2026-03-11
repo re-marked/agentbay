@@ -33,7 +33,7 @@ import type {
 const costConfig = {
   cost: {
     label: "Est. API Cost",
-    color: "hsl(var(--primary))",
+    color: "oklch(var(--primary))",
   },
 } satisfies ChartConfig
 
@@ -118,15 +118,15 @@ function CostAreaChart({ data }: { data: DailyCost[] }) {
 const tokenPieConfig = {
   "input-tokens": {
     label: "Input",
-    color: "hsl(var(--primary))",
+    color: "oklch(var(--primary))",
   },
   "output-tokens": {
     label: "Output",
-    color: "hsl(var(--chart-2))",
+    color: "oklch(var(--chart-2))",
   },
 } satisfies ChartConfig
 
-const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--chart-2))"]
+const PIE_COLORS = ["oklch(var(--primary))", "oklch(var(--chart-2))"]
 
 function TokenPieChart({ data }: { data: TokenSplit[] }) {
   const total = data.reduce((s, d) => s + d.value, 0)
@@ -155,7 +155,7 @@ function TokenPieChart({ data }: { data: TokenSplit[] }) {
                 innerRadius={50}
                 outerRadius={80}
                 strokeWidth={2}
-                stroke="hsl(var(--card))"
+                stroke="oklch(var(--card))"
               >
                 {data.map((_, i) => (
                   <Cell key={i} fill={PIE_COLORS[i]} />
@@ -175,7 +175,7 @@ function TokenPieChart({ data }: { data: TokenSplit[] }) {
 const agentBarConfig = {
   cost: {
     label: "Est. Cost",
-    color: "hsl(280, 65%, 55%)",
+    color: "oklch(57.95% 0.2236 312.00)",
   },
 } satisfies ChartConfig
 
@@ -235,7 +235,7 @@ function AgentBarChart({ data }: { data: AgentBreakdown[] }) {
 const computeConfig = {
   seconds: {
     label: "Seconds",
-    color: "hsl(35, 90%, 55%)",
+    color: "oklch(76.67% 0.1581 68.45)",
   },
 } satisfies ChartConfig
 

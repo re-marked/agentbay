@@ -92,7 +92,7 @@ function formatDate(dateStr: string, isHourly: boolean = false): string {
 // ── Chart config ─────────────────────────────────────────────────────────
 
 const costChartConfig = {
-  cost: { label: 'Est. API Cost', color: 'hsl(var(--primary))' },
+  cost: { label: 'Est. API Cost', color: 'oklch(var(--primary))' },
 } satisfies ChartConfig
 
 // ── Component ────────────────────────────────────────────────────────────
@@ -237,8 +237,8 @@ export function UsageSection({ instanceId, testMode }: { instanceId: string; tes
             <AreaChart data={dailySlice} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
               <defs>
                 <linearGradient id="costGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  <stop offset="0%" stopColor="oklch(var(--primary))" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="oklch(var(--primary))" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis
@@ -265,7 +265,7 @@ export function UsageSection({ instanceId, testMode }: { instanceId: string; tes
               <Area
                 type="monotone"
                 dataKey="cost"
-                stroke="hsl(var(--primary))"
+                stroke="oklch(var(--primary))"
                 fill="url(#costGrad)"
                 strokeWidth={2}
                 animationDuration={800}

@@ -42,7 +42,7 @@ export function ChannelMemberList({ members, teamId, teamName, availableAgents =
   }
 
   return (
-    <div className="flex h-full w-56 shrink-0 flex-col border-l border-border/40 bg-background/50">
+    <div className="flex h-full w-60 shrink-0 flex-col border-l border-border/40 bg-background/50">
       <div className="flex items-center justify-between px-3 pt-3 pb-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Members — {members.length}

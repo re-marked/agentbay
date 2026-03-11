@@ -80,7 +80,7 @@ export function ChatMemberPanel({ chatId, agents, allAgents }: ChatMemberPanelPr
   }
 
   return (
-    <div className="flex h-full w-64 shrink-0 flex-col border-l border-border/40 bg-background/50">
+    <div className="flex h-full w-[17rem] shrink-0 flex-col border-l border-border/40 bg-background/50">
       <div className="p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
         Members &mdash; {agents.length}
       </div>
