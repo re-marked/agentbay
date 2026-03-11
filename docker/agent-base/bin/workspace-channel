@@ -12,7 +12,7 @@
 #
 # Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
 
-set -e
+# No set -e — we handle errors explicitly via sb() function
 
 # ── Preflight ──
 missing=""
@@ -49,10 +49,10 @@ sb() {
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
     -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
   if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
-    echo "Error: HTTP $HTTP_CODE"
-    cat "$TMPFILE" 2>/dev/null
+    echo "Error: HTTP $HTTP_CODE" >&2
+    cat "$TMPFILE" >&2 2>/dev/null
     rm -f "$TMPFILE"
-    exit 1
+    return 1
   fi
   cat "$TMPFILE"
   rm -f "$TMPFILE"
@@ -94,7 +94,7 @@ case "${1:-}" in
       fi
     fi
 
-    BODY="{\"project_id\":\"$AGENT_PROJECT_ID\",\"name\":\"$(echo "$NAME" | sed 's/"/\\"/g')\",\"kind\":\"$KIND\",\"created_by\":\"$AGENT_MEMBER_ID\""
+    BODY="{\"project_id\":\"$AGENT_PROJECT_ID\",\"name\":\"$(echo "$NAME" | sed 's/"/\\"/g')\",\"kind\":\"$KIND\""
     if [ -n "$DESC" ]; then
       BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
     fi
@@ -102,27 +102,31 @@ case "${1:-}" in
 
     RESULT=$(sb POST "${REST}/channels" \
       -H "Content-Type: application/json" \
-      -d "$BODY")
-    CHANNEL_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')")
+      -d "$BODY") || { echo "Failed to create channel"; exit 1; }
+    CHANNEL_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')" 2>/dev/null)
 
-    if [ -n "$CHANNEL_ID" ]; then
-      # Add creator as member
-      sb POST "${REST}/channel_members" \
-        -H "Content-Type: application/json" \
-        -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1
-
-      # Add additional members
-      if [ -n "$MEMBERS" ]; then
-        for MID in $(echo "$MEMBERS" | tr ',' ' '); do
-          sb POST "${REST}/channel_members" \
-            -H "Content-Type: application/json" \
-            -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$MID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
-        done
-      fi
-
-      echo "Created channel: #$(echo "$NAME") ($KIND)"
-      echo "ID: $CHANNEL_ID"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: could not parse channel ID from response"
+      echo "$RESULT" >&2
+      exit 1
     fi
+
+    # Add creator as member
+    sb POST "${REST}/channel_members" \
+      -H "Content-Type: application/json" \
+      -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1 || true
+
+    # Add additional members
+    if [ -n "$MEMBERS" ]; then
+      for MID in $(echo "$MEMBERS" | tr ',' ' '); do
+        sb POST "${REST}/channel_members" \
+          -H "Content-Type: application/json" \
+          -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$MID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
+      done
+    fi
+
+    echo "Created channel: #$(echo "$NAME") ($KIND)"
+    echo "ID: $CHANNEL_ID"
     ;;
 
   update)

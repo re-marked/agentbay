@@ -8,7 +8,7 @@
 #
 # Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
 
-set -e
+# No set -e — we handle errors explicitly via sb() function
 
 # ── Preflight ──
 missing=""
@@ -41,10 +41,10 @@ sb() {
   HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
     -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
   if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
-    echo "Error: HTTP $HTTP_CODE"
-    cat "$TMPFILE" 2>/dev/null
+    echo "Error: HTTP $HTTP_CODE" >&2
+    cat "$TMPFILE" >&2 2>/dev/null
     rm -f "$TMPFILE"
-    exit 1
+    return 1
   fi
   cat "$TMPFILE"
   rm -f "$TMPFILE"
@@ -86,10 +86,10 @@ case "${1:-}" in
 
     RESULT=$(sb POST "${REST}/tasks" \
       -H "Content-Type: application/json" \
-      -d "$BODY")
+      -d "$BODY") || { echo "Failed to create task"; exit 1; }
 
     # Extract task ID from result
-    TASK_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')")
+    TASK_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')" 2>/dev/null)
 
     # Announce in #tasks channel and store thread_root_id
     TASKS_CHANNEL_ID=$(curl -s "${REST}/channels?project_id=eq.${AGENT_PROJECT_ID}&kind=eq.broadcast&name=eq.tasks&archived=eq.false&select=id&limit=1" \
