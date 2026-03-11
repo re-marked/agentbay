@@ -170,8 +170,8 @@ export async function createTeam(formData: FormData) {
     ])
   }
 
-  // ── 13. Fire provisioning task for team leader
-  await triggerProvision({
+  // ── 13. Fire provisioning task for team leader (fire-and-forget — don't block team creation)
+  triggerProvision({
     userId: user.id,
     agentId: personalAiAgent.id,
     instanceId: instance.id,
@@ -181,6 +181,8 @@ export async function createTeam(formData: FormData) {
     teamId: team.id,
     teamName: name,
     teamDescription: description,
+  }).catch((err) => {
+    console.error('Failed to trigger team leader provisioning:', err)
   })
 
   revalidatePath('/workspace', 'layout')
