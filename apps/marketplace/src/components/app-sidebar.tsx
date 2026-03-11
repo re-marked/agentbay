@@ -99,7 +99,7 @@ export function AppSidebar({
     return [...broadcastChannels, ...teamChannels]
   }, [broadcastChannels, teams])
 
-  const { unreadCounts } = useUnreadNotifications(allChannels, userMemberId)
+  const { unreadCounts } = useUnreadNotifications(allChannels, userMemberId, activeProjectId)
 
   return (
     <Sidebar variant="inset" collapsible="icon" {...props}>

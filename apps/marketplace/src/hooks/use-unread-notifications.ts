@@ -10,16 +10,17 @@ interface Channel {
   name: string
 }
 
-const POLL_INTERVAL = 3_000 // 3 seconds
+const FALLBACK_POLL_INTERVAL = 30_000 // 30 seconds — fallback for autonomous agent messages
 
 /**
- * Poll for new messages in broadcast channels.
- * Tracks unread counts and shows toast notifications.
- * Clears unread when the user navigates to the channel.
+ * Subscribe to Realtime Broadcast for instant notifications,
+ * with a slow poll fallback for messages from autonomous agents
+ * (which don't go through the stream route).
  */
 export function useUnreadNotifications(
   channels: Channel[],
   userMemberId: string | null,
+  projectId?: string | null,
 ) {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const pathname = usePathname()
@@ -29,8 +30,8 @@ export function useUnreadNotifications(
   const channelKey = channels.map(c => c.id).sort().join(',')
   const stableChannels = useMemo(() => channels, [channelKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track the latest seen message per channel (to detect new ones)
-  const lastSeenRef = useRef<Record<string, string>>({}) // channelId → latest message created_at
+  // Track the latest seen message per channel
+  const lastSeenRef = useRef<Record<string, string>>({})
   const initializedRef = useRef(false)
 
   // Channel name map
@@ -61,7 +62,58 @@ export function useUnreadNotifications(
     }
   }, [activeChannelId])
 
-  // Poll for new messages
+  // Handle a new message notification (shared by Realtime + poll)
+  const handleNewMessage = useCallback((channelId: string, preview: string) => {
+    const channelName = channelMapRef.current[channelId]
+    if (!channelName) return // Not a tracked channel
+
+    // Skip if user is viewing this channel
+    if (channelId === activeChannelIdRef.current) return
+
+    // Increment unread
+    setUnreadCounts(prev => ({
+      ...prev,
+      [channelId]: (prev[channelId] ?? 0) + 1,
+    }))
+
+    // Show toast
+    const truncated = preview.length > 80 ? preview.slice(0, 80) + '\u2026' : preview
+    toast(`#${channelName}`, {
+      description: truncated,
+      duration: 4000,
+      action: {
+        label: 'View',
+        onClick: () => {
+          window.location.href = `/workspace/c/${channelId}`
+        },
+      },
+    })
+  }, [])
+
+  // ── Realtime Broadcast subscription ──
+  useEffect(() => {
+    if (!projectId) return
+
+    const supabase = supabaseRef.current
+    const channel = supabase.channel(`project:${projectId}:messages`)
+      .on('broadcast', { event: 'new_message' }, (msg) => {
+        const { channelId, senderId, preview } = msg.payload as {
+          channelId: string
+          senderId: string
+          preview: string
+        }
+        // Skip own messages
+        if (senderId === userMemberId) return
+        handleNewMessage(channelId, preview ?? 'New message')
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [projectId, userMemberId, handleNewMessage])
+
+  // ── Fallback poll (slow) for autonomous agent messages ──
   const poll = useCallback(async () => {
     if (!stableChannels.length || !userMemberId) return
 
@@ -70,7 +122,6 @@ export function useUnreadNotifications(
     for (const channel of stableChannels) {
       const lastSeen = lastSeenRef.current[channel.id]
 
-      // Build query: get the latest message in this channel
       let query = supabase
         .from('channel_messages')
         .select('id, channel_id, sender_id, content, created_at')
@@ -91,51 +142,28 @@ export function useUnreadNotifications(
       const msg = data[0]
 
       if (!initializedRef.current) {
-        // First poll — just record the latest timestamps, don't notify
+        // First poll — just record timestamps, don't notify
         lastSeenRef.current[channel.id] = msg.created_at
         continue
       }
 
-      // New message found
+      // New message found — update timestamp
       lastSeenRef.current[channel.id] = msg.created_at
 
-      // Skip if user is viewing this channel
-      if (channel.id === activeChannelIdRef.current) continue
-
-      // Increment unread
-      setUnreadCounts(prev => ({
-        ...prev,
-        [channel.id]: (prev[channel.id] ?? 0) + 1,
-      }))
-
-      // Show toast
-      const preview = msg.content?.length > 80
-        ? msg.content.slice(0, 80) + '…'
-        : msg.content ?? 'New message'
-
-      toast(`#${channel.name}`, {
-        description: preview,
-        duration: 4000,
-        action: {
-          label: 'View',
-          onClick: () => {
-            window.location.href = `/workspace/c/${channel.id}`
-          },
-        },
-      })
+      // Notify (handleNewMessage deduplicates via active channel check)
+      handleNewMessage(channel.id, msg.content ?? 'New message')
     }
 
     initializedRef.current = true
-  }, [stableChannels, userMemberId])
+  }, [stableChannels, userMemberId, handleNewMessage])
 
-  // Start polling
   useEffect(() => {
     if (!stableChannels.length || !userMemberId) return
 
     // Initial poll to seed timestamps
     poll()
 
-    const interval = setInterval(poll, POLL_INTERVAL)
+    const interval = setInterval(poll, FALLBACK_POLL_INTERVAL)
     return () => clearInterval(interval)
   }, [poll, stableChannels, userMemberId])
 

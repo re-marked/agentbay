@@ -1,6 +1,7 @@
 import { getUser } from '@/lib/auth/get-user'
 import { streamFromAgent } from '@/lib/agents/stream-dispatch'
 import { Members, Channels, Messages, Agents } from '@agentbay/db/primitives'
+import { createServiceClient } from '@agentbay/db'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -71,7 +72,22 @@ export async function POST(request: Request) {
     }
   }
 
-  // 4. Persist user message
+  // 4. Set up Realtime broadcast for notifications (non-blocking)
+  const supabaseService = createServiceClient()
+  const notifyChannel = supabaseService.channel(`project:${channel.project_id}:messages`)
+  let notifyReady = false
+  notifyChannel.subscribe((status) => { notifyReady = status === 'SUBSCRIBED' })
+
+  function broadcastMessage(channelId: string, senderId: string, preview: string) {
+    if (!notifyReady) return
+    notifyChannel.send({
+      type: 'broadcast',
+      event: 'new_message',
+      payload: { channelId, senderId, preview: preview.slice(0, 100), ts: Date.now() },
+    }).catch(() => {})
+  }
+
+  // 5. Persist user message (broadcast user msg not needed — user sees their own)
   let userMsgId: string
   try {
     userMsgId = await Messages.send(channelId, userMember.id, content, {
@@ -90,7 +106,7 @@ export async function POST(request: Request) {
     })
   }
 
-  // 5. Resolve agent — 3-tier: instanceId hint → task assignee → channel members (prefer running)
+  // 6. Resolve agent — 3-tier: instanceId hint → task assignee → channel members (prefer running)
   const agentMember = await Agents.resolveAgentForChannel(channelId, userMember.id, { instanceId, taskId })
   if (!agentMember) {
     return new Response(JSON.stringify({ error: 'No agent found for this context' }), {
@@ -99,10 +115,10 @@ export async function POST(request: Request) {
     })
   }
 
-  // 6. Mark agent as working
+  // 7. Mark agent as working
   await Members.updateStatus(agentMember.memberId, 'working')
 
-  // 7. Get agent connection info
+  // 8. Get agent connection info
   let flyAppName: string
   let gatewayToken: string
   try {
@@ -129,10 +145,10 @@ export async function POST(request: Request) {
     })
   }
 
-  // 8. Load recent history for context
+  // 9. Load recent history for context
   const messages = await Messages.loadContext(channelId, userMember.id, { limit: 30, threadId })
 
-  // 9. Stream from agent — tools persist as real messages, text persists on completion
+  // 10. Stream from agent — tools persist as real messages, text persists on completion
   const persistedToolIds = new Set<string>()
 
   // Stable session key: task-scoped when in task thread, otherwise channel-scoped
@@ -179,8 +195,10 @@ export async function POST(request: Request) {
             originId: userMsgId,
             parentId: threadId ?? userMsgId,
           })
+          broadcastMessage(channelId, agentMember.memberId, result.content)
         }
         await Members.updateStatus(agentMember.memberId, 'idle')
+        supabaseService.removeChannel(notifyChannel)
       },
     },
     request.signal,
