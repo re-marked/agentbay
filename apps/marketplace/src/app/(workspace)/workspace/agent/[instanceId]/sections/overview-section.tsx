@@ -94,15 +94,15 @@ function sumField(data: TimeSeriesEntry[], field: keyof Omit<TimeSeriesEntry, 'd
 // ── Chart configs (one per stat, different colors) ───────────────────────
 
 const costChartConfig = {
-  cost: { label: 'Est. API Cost', color: 'hsl(var(--primary))' },
+  cost: { label: 'Est. API Cost', color: 'oklch(var(--primary))' },
 } satisfies ChartConfig
 
 const minutesChartConfig = {
-  minutes: { label: 'Minutes', color: 'hsl(160, 60%, 45%)' },
+  minutes: { label: 'Minutes', color: 'oklch(69.83% 0.1337 165.46)' },
 } satisfies ChartConfig
 
 const messagesChartConfig = {
-  messages: { label: 'Messages', color: 'hsl(35, 90%, 55%)' },
+  messages: { label: 'Messages', color: 'oklch(76.67% 0.1581 68.45)' },
 } satisfies ChartConfig
 
 // ── Component ────────────────────────────────────────────────────────────
@@ -468,7 +468,7 @@ function SparklineCard({
           <ChartContainer config={chartConfig} className="h-16 w-full">
             <BarChart data={data} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
               <ChartTooltip
-                cursor={{ fill: 'hsl(var(--muted))', radius: 4 }}
+                cursor={{ fill: 'oklch(var(--muted))', radius: 4 }}
                 content={
                   <ChartTooltipContent
                     hideIndicator

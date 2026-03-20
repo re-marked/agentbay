@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { AgentAvatar } from "@/lib/agents"
+import { AgentAvatar, SYSTEM_AGENT_SLUGS } from "@/lib/agents"
 import { AgentProfileCard } from "@/components/agent-profile-card"
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications"
 import { CreateTeamDialog } from "@/components/create-team-dialog"
@@ -232,12 +232,12 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Direct Messages (minus co-founder) */}
+        {/* Direct Messages (minus co-founder and system agents) */}
         <SidebarGroup>
           <SidebarGroupLabel>Direct Messages</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {agents.map((agent) => {
+              {agents.filter(a => !(SYSTEM_AGENT_SLUGS as readonly string[]).includes(a.slug)).map((agent) => {
                 const dmPath = `/workspace/dm/${agent.instanceId}`
                 const isActive = pathname.startsWith(dmPath)
                 return (

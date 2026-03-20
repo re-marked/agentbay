@@ -87,7 +87,7 @@ export function AuroraHero({ className }: { className?: string }) {
         className="h-full w-full opacity-70 blur-[60px] saturate-150"
       />
       {/* Vignette to blend into background */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,hsl(var(--background))_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,oklch(var(--background))_100%)]" />
     </div>
   )
 }

@@ -10,10 +10,10 @@ const CODING = 1
 const PAYING = 6
 const FREE_CHAT = 401
 
-const COLOR_NEVER = 'hsl(30 3% 22%)'
-const COLOR_FREE = 'hsl(160 50% 42%)'
-const COLOR_PAYING = 'hsl(45 80% 55%)'
-const COLOR_CODING = 'hsl(0 65% 52%)'
+const COLOR_NEVER = 'oklch(34.22% 0.0037 67.70)'
+const COLOR_FREE = 'oklch(63.74% 0.1115 166.97)'
+const COLOR_PAYING = 'oklch(80.85% 0.1523 88.89)'
+const COLOR_CODING = 'oklch(57.57% 0.1960 25.90)'
 
 type Category = 'never' | 'free' | 'paying' | 'coding'
 
@@ -163,7 +163,7 @@ export function AiAdoptionGrid() {
         ctx.roundRect(x, y, dotSize, dotSize, radius)
 
         if (!show) {
-          ctx.fillStyle = 'hsl(30 3% 13%)'
+          ctx.fillStyle = 'oklch(24.91% 0.0024 67.72)'
           ctx.globalAlpha = 1
         } else {
           ctx.fillStyle = getColor(cat)

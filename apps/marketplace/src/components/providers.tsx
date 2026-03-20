@@ -12,14 +12,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
         position="bottom-right"
         toastOptions={{
           style: {
-            background: 'hsl(30 3% 13%)',
-            border: '1px solid hsl(30 3% 18%)',
-            color: 'hsl(40 10% 95%)',
-            '--normal-text': 'hsl(30 5% 55%)',
+            background: 'oklch(24.91% 0.0024 67.72)',
+            border: '1px solid oklch(30.17% 0.0032 67.71)',
+            color: 'oklch(96.34% 0.0024 84.56)',
+            '--normal-text': 'oklch(64.41% 0.0109 67.63)',
           } as React.CSSProperties,
           actionButtonStyle: {
-            background: 'hsl(215 90% 58%)',
-            color: 'hsl(0 0% 100%)',
+            background: 'oklch(62.35% 0.1857 257.79)',
+            color: 'oklch(100% 0 0)',
           },
         }}
       />

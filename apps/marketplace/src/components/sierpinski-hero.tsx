@@ -12,7 +12,7 @@ export function SierpinskiHero({ className }: { className?: string }) {
       aria-label="AgentBay fractal"
     >
       {/* Solid background triangle — blocks rays from showing through gaps */}
-      <polygon points="0,0 128,0 64,110.8" fill="hsl(30,3%,10%)" />
+      <polygon points="0,0 128,0 64,110.8" fill="oklch(21.62% 0.0019 67.72)" />
 
       <g fill="currentColor">
         {/* Row 1: top-left order-2 block */}

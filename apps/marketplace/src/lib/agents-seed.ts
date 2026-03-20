@@ -1,5 +1,28 @@
 import { createServiceClient } from '@agentbay/db/server'
 
+const SYSTEM_AGENTS = [
+  {
+    name: "Co-Founder",
+    slug: "personal-ai",
+    tagline: "Your permanent AI partner — runs the corporation with you",
+    description: "Your Co-Founder is the first agent in every corporation. It knows your goals, manages your other agents, and operates as a true business partner. Always running, always thinking about what's next. One per corporation — can't be fired.",
+    category: "system",
+    pricing_model: "free",
+    icon_url: "\u{1F91D}",
+    tags: ["co-founder", "leadership", "management"],
+  },
+  {
+    name: "Team Leader",
+    slug: "team-leader",
+    tagline: "Autonomous team coordinator — assigns tasks, tracks progress, reports up",
+    description: "Each team gets a dedicated Team Leader agent that owns outcomes. It breaks down goals into tasks, assigns work to team members, tracks progress, and keeps you informed. Direct, efficient, and biased toward action.",
+    category: "system",
+    pricing_model: "free",
+    icon_url: "\u{1F451}",
+    tags: ["team-leader", "coordination", "task-management"],
+  },
+]
+
 const DEMO_AGENTS = [
   {
     name: "Nova",
@@ -226,15 +249,6 @@ export async function seedDemoAgentsIfEmpty() {
 
   const service = createServiceClient()
 
-  const { count, error: countError } = await service
-    .from("agents")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "published")
-
-  if (countError) return
-
-  if (count !== null && count >= DEMO_AGENTS.length) return
-
   // We need a creator_id — use the first user
   const { data: firstUser, error: userError } = await service
     .from("users")
@@ -245,6 +259,30 @@ export async function seedDemoAgentsIfEmpty() {
   if (userError || !firstUser) return
 
   const now = new Date().toISOString()
+
+  // System agents always get upserted (ensures they exist + category stays "system")
+  const systemAgents = SYSTEM_AGENTS.map((a) => ({
+    ...a,
+    creator_id: firstUser.id,
+    github_repo_url: `https://github.com/agentbay/${a.slug}`,
+    status: "published" as const,
+    published_at: now,
+    total_hires: 0,
+    total_reviews: 0,
+    avg_rating: null,
+  }))
+
+  await service.from("agents").upsert(systemAgents, { onConflict: "slug" })
+
+  // Demo agents — only seed if table is mostly empty
+  const { count, error: countError } = await service
+    .from("agents")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "published")
+
+  if (countError) return
+  if (count !== null && count >= DEMO_AGENTS.length) return
+
   const agents = DEMO_AGENTS.map((a) => ({
     ...a,
     creator_id: firstUser.id,
