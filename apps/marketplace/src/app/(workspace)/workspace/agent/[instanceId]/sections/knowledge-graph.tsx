@@ -41,11 +41,11 @@ interface FileData {
 
 // ── Constants ────────────────────────────────────────────────────────────
 
-const NODE_COLOR_ROOT = 'hsl(215, 90%, 58%)'
-const NODE_COLOR_FOLDER = 'hsl(35, 80%, 55%)'
-const NODE_COLOR_DEFAULT = 'hsl(160, 60%, 45%)'
-const EDGE_COLOR = 'hsl(0, 0%, 30%)'
-const LABEL_COLOR = 'hsl(0, 0%, 70%)'
+const NODE_COLOR_ROOT = 'oklch(62.35% 0.1857 257.79)'
+const NODE_COLOR_FOLDER = 'oklch(75.03% 0.1464 70.15)'
+const NODE_COLOR_DEFAULT = 'oklch(69.83% 0.1337 165.46)'
+const EDGE_COLOR = 'oklch(41.84% 0 0)'
+const LABEL_COLOR = 'oklch(76.52% 0 0)'
 
 // ── Wikilink + tag parsing ───────────────────────────────────────────────
 

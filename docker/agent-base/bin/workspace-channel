@@ -1,0 +1,266 @@
+#!/bin/sh
+# workspace-channel — create, update, and manage channels (direct Supabase)
+# Usage:
+#   workspace-channel create "name" [--kind team|direct|broadcast] [--description "..."] [--members id1,id2,...]
+#   workspace-channel update <channelId> [--name "..."] [--description "..."] [--pinned] [--no-pinned]
+#   workspace-channel archive <channelId>
+#   workspace-channel unarchive <channelId>
+#   workspace-channel invite <channelId> <memberId>
+#   workspace-channel kick <channelId> <memberId>
+#   workspace-channel members <channelId>
+#   workspace-channel who                        # list all members in the project
+#
+# Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+
+# No set -e — we handle errors explicitly via sb() function
+
+# ── Preflight ──
+missing=""
+[ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+[ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+[ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
+[ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
+if [ -n "$missing" ]; then
+  echo "Error: Missing required env vars:$missing"
+  exit 1
+fi
+
+REST="${SUPABASE_URL}/rest/v1"
+AUTH_H="Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+KEY_H="apikey: ${SUPABASE_SERVICE_ROLE_KEY}"
+
+usage() {
+  echo "Usage:"
+  echo "  workspace-channel create \"name\" [--kind team|direct|broadcast] [--description \"...\"] [--members id1,id2]"
+  echo "  workspace-channel update <channelId> [--name \"...\"] [--description \"...\"] [--pinned] [--no-pinned]"
+  echo "  workspace-channel archive <channelId>"
+  echo "  workspace-channel unarchive <channelId>"
+  echo "  workspace-channel invite <channelId> <memberId>"
+  echo "  workspace-channel kick <channelId> <memberId>"
+  echo "  workspace-channel members <channelId>"
+  echo "  workspace-channel who"
+  exit 1
+}
+
+sb() {
+  METHOD="$1"; shift
+  URL="$1"; shift
+  TMPFILE=$(mktemp)
+  HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
+    -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
+  if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
+    echo "Error: HTTP $HTTP_CODE" >&2
+    cat "$TMPFILE" >&2 2>/dev/null
+    rm -f "$TMPFILE"
+    return 1
+  fi
+  cat "$TMPFILE"
+  rm -f "$TMPFILE"
+}
+
+case "${1:-}" in
+  create)
+    shift
+    NAME=""
+    KIND="team"
+    DESC=""
+    MEMBERS=""
+    TEAM_ID="${AGENT_TEAM_ID:-}"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --kind)        KIND="$2"; shift 2 ;;
+        --description) DESC="$2"; shift 2 ;;
+        --members)     MEMBERS="$2"; shift 2 ;;
+        --team)        TEAM_ID="$2"; shift 2 ;;
+        *)             NAME="$1"; shift ;;
+      esac
+    done
+    if [ -z "$NAME" ]; then
+      echo "Error: name is required"
+      exit 1
+    fi
+
+    # Dedup: check if broadcast/team channel with same name already exists
+    if [ "$KIND" = "broadcast" ] || [ "$KIND" = "team" ]; then
+      EXISTING=$(curl -s "${REST}/channels?project_id=eq.${AGENT_PROJECT_ID}&name=eq.$(echo "$NAME" | sed 's/ /%20/g')&kind=eq.${KIND}&archived=eq.false&select=id,name,kind&limit=1" \
+        -H "$AUTH_H" -H "$KEY_H")
+      EXISTING_ID=$(echo "$EXISTING" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+      if [ -n "$EXISTING_ID" ]; then
+        # Ensure agent is a member, then return existing
+        sb POST "${REST}/channel_members" \
+          -H "Content-Type: application/json" \
+          -H "Prefer: resolution=ignore-duplicates" \
+          -d "{\"channel_id\":\"$EXISTING_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
+        echo "Channel already exists: #$NAME ($EXISTING_ID)"
+        exit 0
+      fi
+    fi
+
+    BODY="{\"project_id\":\"$AGENT_PROJECT_ID\",\"name\":\"$(echo "$NAME" | sed 's/"/\\"/g')\",\"kind\":\"$KIND\""
+    if [ -n "$DESC" ]; then
+      BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
+    fi
+    if [ -n "$TEAM_ID" ] && [ "$KIND" = "team" ]; then
+      BODY="$BODY,\"team_id\":\"$TEAM_ID\""
+    fi
+    BODY="$BODY}"
+
+    RESULT=$(sb POST "${REST}/channels" \
+      -H "Content-Type: application/json" \
+      -d "$BODY") || { echo "Failed to create channel"; exit 1; }
+    CHANNEL_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')" 2>/dev/null)
+
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: could not parse channel ID from response"
+      echo "$RESULT" >&2
+      exit 1
+    fi
+
+    # Add creator (agent) as member
+    sb POST "${REST}/channel_members" \
+      -H "Content-Type: application/json" \
+      -H "Prefer: resolution=ignore-duplicates" \
+      -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$AGENT_MEMBER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1 || true
+
+    # Add the project owner (user) as member — they must see all channels
+    OWNER_ID=$(curl -s "${REST}/members?project_id=eq.${AGENT_PROJECT_ID}&rank=eq.owner&select=id&limit=1" \
+      -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+    if [ -n "$OWNER_ID" ] && [ "$OWNER_ID" != "$AGENT_MEMBER_ID" ]; then
+      sb POST "${REST}/channel_members" \
+        -H "Content-Type: application/json" \
+        -H "Prefer: resolution=ignore-duplicates" \
+        -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$OWNER_ID\",\"role\":\"owner\"}" > /dev/null 2>&1 || true
+    fi
+
+    # Add additional members
+    if [ -n "$MEMBERS" ]; then
+      for MID in $(echo "$MEMBERS" | tr ',' ' '); do
+        sb POST "${REST}/channel_members" \
+          -H "Content-Type: application/json" \
+          -H "Prefer: resolution=ignore-duplicates" \
+          -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$MID\",\"role\":\"participant\"}" > /dev/null 2>&1 || true
+      done
+    fi
+
+    echo "Created channel: #$(echo "$NAME") ($KIND)"
+    echo "ID: $CHANNEL_ID"
+    ;;
+
+  update)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: channelId is required"
+      exit 1
+    fi
+    shift 2
+    BODY="{"
+    FIRST=true
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"name\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --description)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --pinned)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"pinned\":true"
+          FIRST=false; shift ;;
+        --no-pinned)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"pinned\":false"
+          FIRST=false; shift ;;
+        *) shift ;;
+      esac
+    done
+    BODY="$BODY}"
+    sb PATCH "${REST}/channels?id=eq.${CHANNEL_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
+      -H "Content-Type: application/json" \
+      -d "$BODY" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const c=Array.isArray(d)?d[0]:d;
+        if(c&&c.name){console.log('Updated: #'+c.name);}
+        else{console.log('Updated channel.');}
+      "
+    ;;
+
+  archive)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then echo "Error: channelId is required"; exit 1; fi
+    sb PATCH "${REST}/channels?id=eq.${CHANNEL_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
+      -H "Content-Type: application/json" \
+      -d '{"archived":true}' | \
+      node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=Array.isArray(d)?d[0]:d;console.log('Archived: #'+(c?.name||CHANNEL_ID))"
+    ;;
+
+  unarchive)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then echo "Error: channelId is required"; exit 1; fi
+    sb PATCH "${REST}/channels?id=eq.${CHANNEL_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
+      -H "Content-Type: application/json" \
+      -d '{"archived":false}' | \
+      node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=Array.isArray(d)?d[0]:d;console.log('Unarchived: #'+(c?.name||CHANNEL_ID))"
+    ;;
+
+  invite)
+    CHANNEL_ID="$2"
+    TARGET_ID="$3"
+    if [ -z "$CHANNEL_ID" ] || [ -z "$TARGET_ID" ]; then
+      echo "Error: workspace-channel invite <channelId> <memberId>"
+      exit 1
+    fi
+    sb POST "${REST}/channel_members" \
+      -H "Content-Type: application/json" \
+      -d "{\"channel_id\":\"$CHANNEL_ID\",\"member_id\":\"$TARGET_ID\",\"role\":\"participant\"}" | \
+      node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const m=Array.isArray(d)?d[0]:d;console.log('Invited '+(m?.member_id?.slice(0,8)||TARGET_ID)+' as '+(m?.role||'participant'))"
+    ;;
+
+  kick)
+    CHANNEL_ID="$2"
+    TARGET_ID="$3"
+    if [ -z "$CHANNEL_ID" ] || [ -z "$TARGET_ID" ]; then
+      echo "Error: workspace-channel kick <channelId> <memberId>"
+      exit 1
+    fi
+    sb DELETE "${REST}/channel_members?channel_id=eq.${CHANNEL_ID}&member_id=eq.${TARGET_ID}" | \
+      node -e "console.log('Removed from channel.')"
+    ;;
+
+  members)
+    CHANNEL_ID="$2"
+    if [ -z "$CHANNEL_ID" ]; then
+      echo "Error: workspace-channel members <channelId>"
+      exit 1
+    fi
+    sb GET "${REST}/channel_members?channel_id=eq.${CHANNEL_ID}&select=member_id,role,members!inner(id,display_name,instance_id,rank,status)" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(!Array.isArray(d)||!d.length){console.log('No members found.');process.exit(0)}
+        d.forEach(cm=>{
+          const m=cm.members;if(!m)return;
+          const tag=m.instance_id?'[bot]':'';
+          console.log(m.id.slice(0,8)+' '+m.display_name+tag+' ['+m.rank+'] '+m.status);
+        });
+      "
+    ;;
+
+  who)
+    sb GET "${REST}/members?project_id=eq.${AGENT_PROJECT_ID}&status=neq.archived&select=id,display_name,instance_id,rank,status&order=rank.asc" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(!Array.isArray(d)||!d.length){console.log('No members found.');process.exit(0)}
+        d.forEach(m=>{
+          const tag=m.instance_id?'[bot]':'';
+          console.log(m.id+' '+m.display_name+tag+' ['+m.rank+'] '+m.status);
+        });
+      "
+    ;;
+
+  *)
+    usage
+    ;;
+esac

@@ -14,6 +14,7 @@ import { signOut } from '@/lib/auth/actions'
 import { LogOut, AlertCircle } from 'lucide-react'
 import { getProfile } from '@/lib/settings/actions'
 import { ProfileForm } from '@/components/profile-form'
+import { DebugToggle } from '@/components/debug/debug-toggle'
 
 export default async function GeneralSettingsPage() {
   const user = await getUser()
@@ -77,6 +78,17 @@ export default async function GeneralSettingsPage() {
             </CardHeader>
             <CardContent>
               <ProfileForm initialData={profile} />
+            </CardContent>
+          </Card>
+
+          {/* Developer */}
+          <Card className="border-0">
+            <CardHeader>
+              <CardTitle className="text-lg">Developer</CardTitle>
+              <CardDescription>Debug tools and diagnostics</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DebugToggle />
             </CardContent>
           </Card>
 

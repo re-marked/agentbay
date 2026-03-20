@@ -1,0 +1,261 @@
+#!/bin/sh
+# workspace-task — create, list, and update tasks (direct Supabase)
+# Usage:
+#   workspace-task create "title" [--description "..."] [--priority high|normal|low] [--assign <memberId>]
+#   workspace-task list [--status pending|assigned|in_progress|completed|failed] [--priority high] [--mine]
+#   workspace-task update <taskId> --status in_progress
+#   workspace-task update <taskId> --status completed
+#
+# Requires: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AGENT_MEMBER_ID, AGENT_PROJECT_ID
+
+# No set -e — we handle errors explicitly via sb() function
+
+# ── Preflight ──
+missing=""
+[ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+[ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+[ -z "$AGENT_MEMBER_ID" ] && missing="$missing AGENT_MEMBER_ID"
+[ -z "$AGENT_PROJECT_ID" ] && missing="$missing AGENT_PROJECT_ID"
+if [ -n "$missing" ]; then
+  echo "Error: Missing required env vars:$missing"
+  exit 1
+fi
+
+REST="${SUPABASE_URL}/rest/v1"
+AUTH_H="Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+KEY_H="apikey: ${SUPABASE_SERVICE_ROLE_KEY}"
+
+usage() {
+  echo "Usage:"
+  echo "  workspace-task create \"title\" [--description \"...\"] [--priority high|normal|low] [--assign <memberId>]"
+  echo "  workspace-task list [--status STATUS] [--priority PRIORITY] [--mine] [--limit N]"
+  echo "  workspace-task update <taskId> --status STATUS [--priority PRIORITY] [--title \"...\"]"
+  exit 1
+}
+
+# Helper: curl with auth headers, check for errors
+sb() {
+  METHOD="$1"; shift
+  URL="$1"; shift
+  TMPFILE=$(mktemp)
+  HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X "$METHOD" "$URL" \
+    -H "$AUTH_H" -H "$KEY_H" -H "Prefer: return=representation" "$@" 2>&1)
+  if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null || [ "$HTTP_CODE" = "000" ]; then
+    echo "Error: HTTP $HTTP_CODE" >&2
+    cat "$TMPFILE" >&2 2>/dev/null
+    rm -f "$TMPFILE"
+    return 1
+  fi
+  cat "$TMPFILE"
+  rm -f "$TMPFILE"
+}
+
+case "${1:-}" in
+  create)
+    shift
+    TITLE=""
+    DESC=""
+    PRIORITY="normal"
+    ASSIGN=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --description) DESC="$2"; shift 2 ;;
+        --priority)    PRIORITY="$2"; shift 2 ;;
+        --assign)      ASSIGN="$2"; shift 2 ;;
+        *)             TITLE="$1"; shift ;;
+      esac
+    done
+    if [ -z "$TITLE" ]; then
+      echo "Error: title is required"
+      exit 1
+    fi
+
+    # Determine status and assignee
+    STATUS="pending"
+    ASSIGN_VAL="null"
+    if [ -n "$ASSIGN" ]; then
+      STATUS="assigned"
+      ASSIGN_VAL="\"$ASSIGN\""
+    fi
+
+    BODY="{\"project_id\":\"$AGENT_PROJECT_ID\",\"title\":\"$(echo "$TITLE" | sed 's/"/\\"/g')\",\"priority\":\"$PRIORITY\",\"status\":\"$STATUS\",\"assigned_to\":$ASSIGN_VAL,\"created_by\":\"$AGENT_MEMBER_ID\""
+    if [ -n "$DESC" ]; then
+      BODY="$BODY,\"description\":\"$(echo "$DESC" | sed 's/"/\\"/g')\""
+    fi
+    BODY="$BODY}"
+
+    RESULT=$(sb POST "${REST}/tasks" \
+      -H "Content-Type: application/json" \
+      -d "$BODY") || { echo "Failed to create task"; exit 1; }
+
+    # Extract task ID from result
+    TASK_ID=$(echo "$RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')" 2>/dev/null)
+
+    # Announce in #tasks channel and store thread_root_id
+    TASKS_CHANNEL_ID=$(curl -s "${REST}/channels?project_id=eq.${AGENT_PROJECT_ID}&kind=eq.broadcast&name=eq.tasks&archived=eq.false&select=id&limit=1" \
+      -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+
+    if [ -n "$TASKS_CHANNEL_ID" ] && [ -n "$TASK_ID" ]; then
+      ANNOUNCE="📋 New task: **${TITLE}** [${PRIORITY}]"
+      if [ -n "$ASSIGN" ]; then
+        ANNOUNCE="$ANNOUNCE — assigned"
+      fi
+
+      # Post announcement and capture the message ID (thread root)
+      MSG_RESULT=$(sb POST "${REST}/channel_messages" \
+        -H "Content-Type: application/json" \
+        -d "{\"channel_id\":\"$TASKS_CHANNEL_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$(echo "$ANNOUNCE" | sed 's/"/\\"/g')\",\"message_kind\":\"system\"}" 2>/dev/null || true)
+
+      MSG_ID=$(echo "$MSG_RESULT" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(Array.isArray(d)?d[0]?.id||'':d.id||'')" 2>/dev/null || true)
+
+      # Store thread_root_id in task metadata + link channel_id
+      if [ -n "$MSG_ID" ]; then
+        sb PATCH "${REST}/tasks?id=eq.${TASK_ID}" \
+          -H "Content-Type: application/json" \
+          -d "{\"channel_id\":\"$TASKS_CHANNEL_ID\",\"metadata\":{\"thread_root_id\":\"$MSG_ID\"}}" > /dev/null 2>&1 || true
+      fi
+    fi
+
+    echo "$RESULT" | node -e "
+      const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      const t=Array.isArray(d)?d[0]:d;
+      if(t&&t.id){console.log('Created: '+t.title+' ('+t.id+')');}
+      else{console.log('Created task.');}
+    "
+    ;;
+
+  list)
+    shift
+    FILTERS="project_id=eq.${AGENT_PROJECT_ID}"
+    LIMIT="50"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status)   FILTERS="${FILTERS}&status=eq.$2"; shift 2 ;;
+        --priority) FILTERS="${FILTERS}&priority=eq.$2"; shift 2 ;;
+        --mine)     FILTERS="${FILTERS}&assigned_to=eq.${AGENT_MEMBER_ID}"; shift ;;
+        --limit)    LIMIT="$2"; shift 2 ;;
+        *)          shift ;;
+      esac
+    done
+    sb GET "${REST}/tasks?${FILTERS}&order=created_at.desc&limit=${LIMIT}&select=id,title,description,status,priority,assigned_to,created_at" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        if(!Array.isArray(d)||!d.length){console.log('No tasks found.');process.exit(0)}
+        d.forEach(t=>{
+          const pri=t.priority==='urgent'?'‼️':t.priority==='high'?'!!':t.priority==='low'?'..':'  ';
+          console.log(pri+' ['+t.status+'] '+t.title+' ('+t.id+')');
+          if(t.description) console.log('   '+t.description.slice(0,120));
+        });
+      "
+    ;;
+
+  update)
+    TASK_ID="$2"
+    if [ -z "$TASK_ID" ]; then
+      echo "Error: taskId is required"
+      exit 1
+    fi
+    # Resolve partial IDs (e.g. 8-char prefix) to full UUID
+    if [ ${#TASK_ID} -lt 36 ]; then
+      FULL_ID=$(curl -s "${REST}/tasks?id=like.${TASK_ID}%25&project_id=eq.${AGENT_PROJECT_ID}&select=id&limit=1" \
+        -H "$AUTH_H" -H "$KEY_H" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d[0]?.id||'')" 2>/dev/null || true)
+      if [ -n "$FULL_ID" ]; then
+        TASK_ID="$FULL_ID"
+      else
+        echo "Error: No task found matching prefix '$TASK_ID'"
+        exit 1
+      fi
+    fi
+    shift 2
+
+    # Track status for thread notification
+    NEW_STATUS=""
+
+    # Build PATCH body
+    BODY="{"
+    FIRST=true
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status)
+          NEW_STATUS="$2"
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"status\":\"$2\""
+          # Auto-set timestamps
+          if [ "$2" = "in_progress" ]; then
+            BODY="$BODY,\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+          elif [ "$2" = "completed" ] || [ "$2" = "failed" ] || [ "$2" = "cancelled" ]; then
+            BODY="$BODY,\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+          fi
+          FIRST=false; shift 2 ;;
+        --priority)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"priority\":\"$2\""
+          FIRST=false; shift 2 ;;
+        --title)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"title\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --description)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"description\":\"$(echo "$2" | sed 's/"/\\"/g')\""
+          FIRST=false; shift 2 ;;
+        --assign)
+          [ "$FIRST" = true ] || BODY="$BODY,"
+          BODY="$BODY\"assigned_to\":\"$2\""
+          FIRST=false; shift 2 ;;
+        *)  shift ;;
+      esac
+    done
+    BODY="$BODY}"
+
+    sb PATCH "${REST}/tasks?id=eq.${TASK_ID}&project_id=eq.${AGENT_PROJECT_ID}" \
+      -H "Content-Type: application/json" \
+      -d "$BODY" | \
+      node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const t=Array.isArray(d)?d[0]:d;
+        if(t&&t.title){console.log('Updated: '+t.title+' → '+t.status);}
+        else{console.log('Updated task.');}
+      "
+
+    # Post status change message to task thread (if thread exists)
+    if [ -n "$NEW_STATUS" ]; then
+      TASK_META=$(curl -s "${REST}/tasks?id=eq.${TASK_ID}&select=channel_id,metadata" \
+        -H "$AUTH_H" -H "$KEY_H" 2>/dev/null || true)
+
+      THREAD_ROOT_ID=$(echo "$TASK_META" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const t=Array.isArray(d)?d[0]:d;
+        const m=t&&t.metadata||{};
+        console.log(m.thread_root_id||'');
+      " 2>/dev/null || true)
+
+      CHAN_ID=$(echo "$TASK_META" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        const t=Array.isArray(d)?d[0]:d;
+        console.log(t&&t.channel_id||'');
+      " 2>/dev/null || true)
+
+      if [ -n "$THREAD_ROOT_ID" ] && [ -n "$CHAN_ID" ]; then
+        case "$NEW_STATUS" in
+          in_progress) STATUS_MSG="🔄 Task started" ;;
+          completed)   STATUS_MSG="✅ Task completed" ;;
+          failed)      STATUS_MSG="❌ Task failed" ;;
+          cancelled)   STATUS_MSG="🚫 Task cancelled" ;;
+          blocked)     STATUS_MSG="⛔ Task blocked" ;;
+          *)           STATUS_MSG="" ;;
+        esac
+
+        if [ -n "$STATUS_MSG" ]; then
+          sb POST "${REST}/channel_messages" \
+            -H "Content-Type: application/json" \
+            -d "{\"channel_id\":\"$CHAN_ID\",\"sender_id\":\"$AGENT_MEMBER_ID\",\"content\":\"$STATUS_MSG\",\"message_kind\":\"system\",\"parent_id\":\"$THREAD_ROOT_ID\",\"depth\":1}" > /dev/null 2>&1 || true
+        fi
+      fi
+    fi
+    ;;
+
+  *)
+    usage
+    ;;
+esac

@@ -6,91 +6,52 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { saveApiKey } from '@/lib/settings/actions'
-import { renameProject } from '@/lib/projects/actions'
+import { renameCorporation } from '@/lib/projects/actions'
 import {
-  Key,
   Loader2,
   ArrowRight,
-  ExternalLink,
   Sparkles,
-  FolderPen,
-  Zap,
+  Building2,
 } from 'lucide-react'
 
-// When hasPlatformKey=true, skip API key step — users can start immediately for free
-const STEPS_BYOK = ['workspace', 'apikey'] as const
-const STEPS_FREE = ['workspace'] as const
-
-type StepBYOK = (typeof STEPS_BYOK)[number]
+interface OnboardingWizardProps {
+  corporationId: string
+  coFounderInstanceId: string | null
+}
 
 export function OnboardingWizard({
-  activeProjectId,
-  hasPlatformKey = false,
-}: {
-  activeProjectId: string
-  hasPlatformKey?: boolean
-}) {
+  corporationId,
+  coFounderInstanceId,
+}: OnboardingWizardProps) {
   const router = useRouter()
-  const steps = hasPlatformKey ? STEPS_FREE : STEPS_BYOK
-  const [step, setStep] = useState<StepBYOK>('workspace')
-  const [projectName, setProjectName] = useState('My Workspace')
-  const [apiKey, setApiKey] = useState('')
+  const [corpName, setCorpName] = useState('')
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  const currentIndex = (steps as readonly string[]).indexOf(step)
-
-  function handleContinue() {
-    const trimmed = projectName.trim()
+  function handleSubmit() {
+    const trimmed = corpName.trim()
     if (!trimmed || trimmed.length > 50) {
       setError('Name must be 1-50 characters.')
       return
     }
     setError(null)
 
-    if (hasPlatformKey) {
-      // Single step — just rename project and redirect to discover
-      startTransition(async () => {
-        try {
-          const renameResult = await renameProject(activeProjectId, trimmed)
-          if ('error' in renameResult && renameResult.error) {
-            setError(renameResult.error)
-            return
-          }
-          router.push('/discover')
-        } catch (err) {
-          setError((err as Error).message)
-        }
-      })
-    } else {
-      setStep('apikey')
-    }
-  }
-
-  function handleSaveKey() {
-    if (!apiKey.trim()) return
-
     startTransition(async () => {
       try {
-        // Rename project first
-        const renameResult = await renameProject(activeProjectId, projectName.trim())
-        if ('error' in renameResult && renameResult.error) {
-          setError(renameResult.error)
+        const result = await renameCorporation(corporationId, trimmed)
+        if ('error' in result && result.error) {
+          setError(result.error)
           return
         }
-
-        // Save API key
-        const keyResult = await saveApiKey({ provider: 'google', apiKey: apiKey.trim() })
-        if ('error' in keyResult && keyResult.error) {
-          setError(keyResult.error as string)
-          return
+        // Redirect to co-founder DM if available, otherwise home
+        if (coFounderInstanceId) {
+          router.push(`/workspace/dm/${coFounderInstanceId}`)
+        } else {
+          router.push('/workspace/home')
+          router.refresh()
         }
-
-        setError(null)
-        router.refresh()
-      } catch {
-        setError('An unexpected error occurred')
+      } catch (err) {
+        setError((err as Error).message)
       }
     })
   }
@@ -105,174 +66,70 @@ export function OnboardingWizard({
         <h2 className="text-2xl font-bold tracking-tight mb-2">
           Welcome to AgentBay
         </h2>
-        <p className="text-muted-foreground mb-6">
-          {hasPlatformKey
-            ? 'One quick step and you\u2019re ready to go.'
-            : step === 'workspace'
-              ? 'Let\u2019s set up your workspace in two quick steps.'
-              : 'Almost there \u2014 one more step to go.'}
+        <p className="text-muted-foreground mb-8">
+          Name your corporation and meet your co-founder.
         </p>
 
-        {/* Free tier badge */}
-        {hasPlatformKey && (
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 text-sm text-emerald-400 mb-6">
-            <Zap className="size-3.5" />
-            Free tier active — start chatting without an API key
-          </div>
-        )}
-
-        {/* Progress indicator */}
-        {steps.length > 1 && (
-          <div className="flex items-center justify-center gap-2 mb-8">
-            {steps.map((s, i) => (
-              <div
-                key={s}
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  i <= currentIndex
-                    ? 'w-8 bg-primary'
-                    : 'w-8 bg-muted-foreground/20'
-                }`}
-              />
-            ))}
-            <span className="ml-2 text-xs text-muted-foreground">
-              Step {currentIndex + 1} of {steps.length}
+        {/* Co-founder status */}
+        {coFounderInstanceId && (
+          <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-2 text-sm text-primary mb-8">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
+            Your co-founder is getting ready...
           </div>
         )}
 
-        {/* Step 1: Name workspace */}
-        {step === 'workspace' && (
-          <Card className="border-0 text-left">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
-                  <FolderPen className="size-5 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Name your workspace</p>
-                  <p className="text-xs text-muted-foreground">
-                    You can always rename it later in Settings
-                  </p>
-                </div>
+        {/* Name input */}
+        <Card className="border-0 text-left">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
+                <Building2 className="size-5 text-muted-foreground" />
               </div>
-
-              <div className="flex gap-2">
-                <Input
-                  type="text"
-                  placeholder="My Workspace"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  maxLength={50}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleContinue()
-                  }}
-                />
-                <Button
-                  onClick={handleContinue}
-                  disabled={!projectName.trim() || isPending}
-                >
-                  {isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : hasPlatformKey ? (
-                    <>
-                      Get Started
-                      <ArrowRight className="size-4 ml-1" />
-                    </>
-                  ) : (
-                    <>
-                      Continue
-                      <ArrowRight className="size-4 ml-1" />
-                    </>
-                  )}
-                </Button>
-              </div>
-
-              {error && (
-                <Alert variant="destructive" className="mt-3 border-0 bg-red-500/10">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              {hasPlatformKey && (
-                <p className="text-xs text-muted-foreground mt-4">
-                  You&apos;re on the free tier — no API key needed to get started.
-                  Add your own key anytime in Settings to unlock higher limits.
+              <div>
+                <p className="text-sm font-semibold">Name your corporation</p>
+                <p className="text-xs text-muted-foreground">
+                  This is your AI company. You can always rename it later.
                 </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step 2: API key (BYOK only) */}
-        {step === 'apikey' && (
-          <Card className="border-0 text-left">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
-                  <Key className="size-5 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Add your Google AI API key</p>
-                  <p className="text-xs text-muted-foreground">
-                    Free to get, takes 60 seconds
-                  </p>
-                </div>
               </div>
+            </div>
 
-              <a
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary hover:bg-primary/15 transition-colors mb-4"
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                placeholder="My Corporation"
+                value={corpName}
+                onChange={(e) => setCorpName(e.target.value)}
+                maxLength={50}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSubmit()
+                }}
+              />
+              <Button
+                onClick={handleSubmit}
+                disabled={!corpName.trim() || isPending}
               >
-                <ExternalLink className="size-4 shrink-0" />
-                <span>
-                  <strong>Get a free key</strong> — Go to Google AI Studio, click
-                  &quot;Create API Key&quot;, copy it
-                </span>
-              </a>
+                {isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <>
+                    Get Started
+                    <ArrowRight className="size-4 ml-1" />
+                  </>
+                )}
+              </Button>
+            </div>
 
-              <div className="flex gap-2">
-                <Input
-                  type="password"
-                  placeholder="AIza..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="font-mono text-sm"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSaveKey()
-                  }}
-                />
-                <Button
-                  onClick={handleSaveKey}
-                  disabled={isPending || !apiKey.trim()}
-                >
-                  {isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <>
-                      Save & Get Started
-                      <ArrowRight className="size-4 ml-1" />
-                    </>
-                  )}
-                </Button>
-              </div>
-
-              {error && (
-                <Alert variant="destructive" className="mt-3 border-0 bg-red-500/10">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              <p className="text-xs text-muted-foreground mt-4">
-                Your key is stored encrypted and only used to power your agents.
-                We never see or share it. You can also use OpenAI or Anthropic keys later in Settings.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+            {error && (
+              <Alert variant="destructive" className="mt-3 border-0 bg-red-500/10">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

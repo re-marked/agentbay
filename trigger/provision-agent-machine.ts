@@ -1,11 +1,14 @@
 import { task, logger } from '@trigger.dev/sdk/v3'
 import { createServiceClient } from '@agentbay/db'
+import { Agents } from '@agentbay/db/primitives'
 import { FlyClient } from '@agentbay/fly'
 import { AGENT_ROLES } from './agent-roles'
+import { PERSONAL_AI_ROLE } from './personal-ai-role'
+import { generateTeamLeaderRole } from './team-leader-role'
 
-// v2026.2.34 trims SOUL.md + moves The Brain to BRAIN.md.
-// Never use :latest — fly deploy doesn't update it, so it's always stale.
-const BASE_IMAGE = process.env.FLY_AGENT_BASE_IMAGE ?? 'registry.fly.io/agentbay-agent-base:v2026.2.34'
+// Hardcoded — do NOT use env var, Trigger.dev cloud env gets stale.
+// Bump this when you push a new image. Never use :latest (Fly doesn't pull fresh).
+const BASE_IMAGE = 'registry.fly.io/agentbay-agent-base:v2026.3.17-dev'
 const FLY_ORG = process.env.FLY_ORG_SLUG ?? 'personal'
 const FLY_REGION = process.env.FLY_REGION ?? 'ord'
 
@@ -14,6 +17,13 @@ export interface ProvisionPayload {
   agentId: string
   instanceId: string
   role?: string
+  projectId?: string    // Workspace context
+  memberId?: string     // Agent's member ID
+  isCoFounder?: boolean // Triggers Personal AI role
+  isTeamLeader?: boolean // Triggers team leader role
+  teamId?: string       // Team UUID (for app naming)
+  teamName?: string     // Team name (for identity)
+  teamDescription?: string | null // Team purpose (for WHOAMI.md)
 }
 
 /**
@@ -52,6 +62,19 @@ async function allocatePublicIPs(appName: string): Promise<void> {
   }
 }
 
+/** Deep-merge two config objects (b overrides a) */
+function deepMerge(a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...a }
+  for (const key in b) {
+    if (b[key] && typeof b[key] === 'object' && !Array.isArray(b[key]) && a[key] && typeof a[key] === 'object') {
+      result[key] = deepMerge(a[key] as Record<string, unknown>, b[key] as Record<string, unknown>)
+    } else {
+      result[key] = b[key]
+    }
+  }
+  return result
+}
+
 export const provisionAgentMachine = task({
   id: 'provision-agent-machine',
   maxDuration: 300,
@@ -63,37 +86,30 @@ export const provisionAgentMachine = task({
 
   // Only mark as error after ALL retries are exhausted
   onFailure: async ({ payload, error }) => {
-    const db = createServiceClient()
     logger.error('Provisioning failed permanently (all retries exhausted)', {
       instanceId: payload.instanceId,
       error: error instanceof Error ? error.message : String(error),
     })
-    await db
-      .from('agent_instances')
-      .update({ status: 'error' })
-      .eq('id', payload.instanceId)
+    await Agents.updateInstance(payload.instanceId, { status: 'error' })
   },
 
   run: async (payload: ProvisionPayload) => {
-    const { userId, agentId, instanceId, role: roleId } = payload
-    const db = createServiceClient()
+    const { userId, agentId, instanceId, role: roleId, isCoFounder, isTeamLeader, teamId, teamName, teamDescription, projectId, memberId } = payload
     const fly = new FlyClient()
 
     try {
       // ── 1. Load agent definition ─────────────────────────────────────────
-      const { data: agent, error: agentErr } = await db
-        .from('agents')
-        .select('slug, docker_image, fly_machine_size, fly_machine_memory_mb')
-        .eq('id', agentId)
-        .single()
-
-      if (agentErr || !agent) throw new Error(`Agent not found: ${agentId}`)
+      const agent = await Agents.findDefById(agentId)
+      if (!agent) throw new Error(`Agent not found: ${agentId}`)
 
       // ── 1b. Load role definition if this is a sub-agent ──────────────────
       const role = roleId ? AGENT_ROLES[roleId] : undefined
       if (roleId && !role) throw new Error(`Unknown role: ${roleId}`)
 
       // ── 2. Load user's API keys (BYOK) and model preference ─────────────
+      // These tables don't have primitives — they're only used by provision
+      const db = createServiceClient()
+
       const { data: apiKeys } = await db
         .from('user_api_keys')
         .select('provider, api_key')
@@ -105,10 +121,10 @@ export const provisionAgentMachine = task({
         .eq('id', userId)
         .single()
 
-      // If user has explicitly set a default model, use it; otherwise choose based on available keys.
-      // When only Routeway is configured, use a free Routeway model to avoid unexpected costs.
+      // If user has explicitly set a default model, use it; otherwise Routeway is primary
+      // (Google models are poor at agentic tool use — Routeway models are much better)
       const userDefaultModel = (userRow as { default_model: string } | null)?.default_model
-      const defaultModel = userDefaultModel ?? 'google/gemini-2.5-flash'
+      const defaultModel = userDefaultModel ?? 'routeway/claude-sonnet-4.6'
 
       const keyEnv: Record<string, string> = {}
       for (const row of apiKeys ?? []) {
@@ -120,23 +136,30 @@ export const provisionAgentMachine = task({
         if (row.provider === 'routeway') keyEnv.ROUTEWAY_API_KEY = row.api_key
       }
 
-      // Platform fallback: if user has no keys, use the platform Routeway key for free-tier access
-      // This lets new users get started immediately without configuring any API keys
-      if (Object.keys(keyEnv).length === 0) {
+      // Always include platform Routeway key — it's the primary provider for agentic usage.
+      // User's own Routeway key takes precedence if they have one.
+      if (!keyEnv.ROUTEWAY_API_KEY) {
         const platformRouteKey = process.env.PLATFORM_ROUTEWAY_API_KEY
         if (platformRouteKey) {
           keyEnv.ROUTEWAY_API_KEY = platformRouteKey
-          logger.info('Using platform Routeway key as fallback (user has no API keys configured)')
-        } else {
-          throw new Error('No API keys configured. Add at least one key in Settings.')
+          logger.info('Using platform Routeway key (user has no personal Routeway key)')
         }
       }
 
-      const image = agent.docker_image ?? BASE_IMAGE
-      // Sub-agents get named by role, master agents by slug
-      const appName = role
-        ? `ab-${role.id}-${userId.slice(0, 8)}`
-        : `ab-${agent.slug}-${userId.slice(0, 8)}`
+      // If no keys at all (not even platform Routeway), fail
+      if (Object.keys(keyEnv).length === 0) {
+        throw new Error('No API keys configured. Add at least one key in Settings.')
+      }
+
+      const image = (agent as any).docker_image ?? BASE_IMAGE
+      // Co-founder gets special name, team leaders by team ID, sub-agents by role, master agents by slug
+      const appName = isCoFounder
+        ? `ab-cofounder-${userId.slice(0, 8)}`
+        : isTeamLeader && teamId
+          ? `ab-tl-${teamId.slice(0, 8)}`
+          : role
+            ? `ab-${role.id}-${userId.slice(0, 8)}`
+            : `ab-${agent.slug}-${userId.slice(0, 8)}`
       const gatewayToken = crypto.randomUUID()
 
       logger.info('Provisioning agent machine', { appName, userId, agentId })
@@ -146,9 +169,17 @@ export const provisionAgentMachine = task({
       await allocatePublicIPs(appName)
       logger.info('Fly app ready with IPs', { appName: app.name })
 
-      // ── 4. Clean up orphaned volumes then create a fresh one ──────────────
-      // Orphaned volumes are pinned to hosts that may be full, causing 412
-      // "insufficient resources" errors. Delete them so Fly picks a healthy host.
+      // ── 4. Clean up orphaned machines and volumes ──────────────────────────
+      const existingMachines = await fly.listMachines(appName)
+      for (const m of existingMachines) {
+        try {
+          await fly.deleteMachine(appName, m.id, true)
+          logger.info('Destroyed orphaned machine', { machineId: m.id, state: m.state })
+        } catch (err) {
+          logger.warn('Failed to destroy orphaned machine', { machineId: m.id, error: String(err) })
+        }
+      }
+
       const existingVolumes = await fly.listVolumes(appName)
       for (const v of existingVolumes) {
         if (!v.attached_machine_id) {
@@ -170,22 +201,43 @@ export const provisionAgentMachine = task({
       logger.info('Volume created', { volumeId: volume.id })
 
       // ── 5. Create machine ─────────────────────────────────────────────────
+      const teamLeaderRole = isTeamLeader && teamName
+        ? generateTeamLeaderRole(teamName, teamDescription ?? null)
+        : null
+
       const roleEnv: Record<string, string> = {}
-      if (role) {
+      if (isCoFounder) {
+        roleEnv.AGENT_SOUL_MD = PERSONAL_AI_ROLE.soul
+        roleEnv.AGENT_WHOAMI_MD = PERSONAL_AI_ROLE.whoami
+        roleEnv.AGENT_WHEREAMI_MD = PERSONAL_AI_ROLE.whereami
+        roleEnv.AGENT_YAML = PERSONAL_AI_ROLE.agentYaml
+      } else if (teamLeaderRole) {
+        roleEnv.AGENT_SOUL_MD = teamLeaderRole.soul
+        roleEnv.AGENT_WHOAMI_MD = teamLeaderRole.whoami
+        roleEnv.AGENT_WHEREAMI_MD = teamLeaderRole.whereami
+        roleEnv.AGENT_YAML = teamLeaderRole.agentYaml
+        if (teamId) roleEnv.AGENT_TEAM_ID = teamId
+      } else if (role) {
         roleEnv.AGENT_SOUL_MD = role.soul
         roleEnv.AGENT_YAML = role.agentYaml
-        roleEnv.AGENT_OPENCLAW_OVERRIDES = JSON.stringify(role.openclawOverrides)
       }
 
-      // Build OpenClaw config overrides to set the user's preferred model.
-      // When only Routeway is configured (no BYOK keys), default to a free tier model.
-      const isRouteOnlySetup = keyEnv.ROUTEWAY_API_KEY && !keyEnv.GEMINI_API_KEY && !keyEnv.OPENAI_API_KEY && !keyEnv.ANTHROPIC_API_KEY
-      const resolvedModel = isRouteOnlySetup && !userDefaultModel
-        ? (process.env.PLATFORM_ROUTEWAY_DEFAULT_MODEL ?? 'routeway/minimax-m2.5')
-        : defaultModel
+      // Workspace context — all agents get Supabase direct access + identity
+      if (projectId) roleEnv.AGENT_PROJECT_ID = projectId
+      if (memberId) roleEnv.AGENT_MEMBER_ID = memberId
+      if (process.env.NEXT_PUBLIC_SUPABASE_URL) roleEnv.SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+      if (process.env.SUPABASE_SERVICE_ROLE_KEY) roleEnv.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+
       const modelOverrides = {
-        agents: { defaults: { model: { primary: resolvedModel }, sandbox: { mode: 'off' } } },
+        agents: { defaults: { model: { primary: defaultModel }, sandbox: { mode: 'off' } } },
       }
+
+      const roleOcOverrides = (isCoFounder
+        ? PERSONAL_AI_ROLE.openclawOverrides
+        : teamLeaderRole
+          ? teamLeaderRole.openclawOverrides
+          : role?.openclawOverrides ?? {}) as Record<string, unknown>
+      const finalOverrides = deepMerge(roleOcOverrides, modelOverrides as unknown as Record<string, unknown>)
 
       const machine = await fly.createMachine(appName, {
         region: FLY_REGION,
@@ -196,7 +248,7 @@ export const provisionAgentMachine = task({
             OPENCLAW_GATEWAY_TOKEN: gatewayToken,
             NODE_OPTIONS: '--max-old-space-size=1536',
             NODE_ENV: 'production',
-            AGENT_OPENCLAW_OVERRIDES: JSON.stringify(modelOverrides),
+            AGENT_OPENCLAW_OVERRIDES: JSON.stringify(finalOverrides),
             ...keyEnv,
             ...roleEnv,
           },
@@ -209,14 +261,14 @@ export const provisionAgentMachine = task({
                 { port: 443, handlers: ['tls', 'http'] },
                 { port: 80, handlers: ['http'] },
               ],
-              autostop: 'suspend',
+              autostop: 'off',
               autostart: true,
-              min_machines_running: 0,
+              min_machines_running: 1,
               checks: [
                 {
                   type: 'http',
                   port: 18789,
-                  path: '/health',
+                  path: '/healthz',
                   method: 'GET',
                   interval: '30s',
                   timeout: '5s',
@@ -228,9 +280,9 @@ export const provisionAgentMachine = task({
           guest: {
             cpu_kind: 'shared',
             cpus: 2,
-            memory_mb: Math.max(agent.fly_machine_memory_mb ?? 2048, 2048),
+            memory_mb: Math.max((agent as any).fly_machine_memory_mb ?? 2048, 2048),
           },
-          restart: { policy: 'on-failure' },
+          restart: { policy: 'always', max_retries: 5 },
         },
       })
 
@@ -241,11 +293,9 @@ export const provisionAgentMachine = task({
       logger.info('Machine started', { machineId: machine.id })
 
       // ── 6b. Wait for health check to pass ──────────────────────────────
-      // OpenClaw takes ~50s to initialize. Don't mark as running until
-      // the /health endpoint responds 200 so users can't chat too early.
-      const healthUrl = `https://${appName}.fly.dev/health`
-      const healthTimeout = 120_000 // 2 minutes max
-      const healthInterval = 5_000  // poll every 5s
+      const healthUrl = `https://${appName}.fly.dev/healthz`
+      const healthTimeout = 120_000
+      const healthInterval = 5_000
       const healthStart = Date.now()
 
       while (Date.now() - healthStart < healthTimeout) {
@@ -266,17 +316,14 @@ export const provisionAgentMachine = task({
       }
 
       // ── 7. Store machine info + gateway token in DB ──────────────────────
-      await db
-        .from('agent_instances')
-        .update({
-          fly_app_name: appName,
-          fly_machine_id: machine.id,
-          fly_volume_id: volume.id,
-          gateway_token: gatewayToken,
-          region: FLY_REGION,
-          status: 'running',
-        })
-        .eq('id', instanceId)
+      await Agents.updateInstance(instanceId, {
+        fly_app_name: appName,
+        fly_machine_id: machine.id,
+        fly_volume_id: volume.id,
+        gateway_token: gatewayToken,
+        region: FLY_REGION,
+        status: 'running',
+      })
 
       logger.info('Instance record updated', { instanceId })
 
@@ -287,9 +334,6 @@ export const provisionAgentMachine = task({
         region: FLY_REGION,
       }
     } catch (err) {
-      // Log but do NOT set status='error' here — onFailure handles that
-      // after all retries are exhausted. Setting error here causes the
-      // frontend poller to give up before retries can succeed.
       logger.error('Provisioning attempt failed (will retry)', {
         instanceId,
         error: err instanceof Error ? err.message : String(err),

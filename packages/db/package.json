@@ -23,6 +23,10 @@
     "./types": {
       "types": "./src/database.types.ts",
       "default": "./src/database.types.ts"
+    },
+    "./primitives": {
+      "types": "./src/primitives/index.ts",
+      "default": "./src/primitives/index.ts"
     }
   },
   "dependencies": {

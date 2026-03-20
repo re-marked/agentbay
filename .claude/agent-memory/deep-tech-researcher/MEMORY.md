@@ -50,6 +50,18 @@ See `monetization-research.md` for full details. Key findings:
 - Credit system: 100 credits = $1 recommended; free tier 7-day expiry; paid tiers monthly
 - Recommended split: 80% creator / 20% platform, AFTER deducting compute at cost
 
+## OpenClaw Reliability Research (2026-03-09)
+See `openclaw-reliability.md` for full details. Key findings:
+- Model failover: 2-stage — auth profile rotation (exponential backoff 1m→5m→25m→1hr) then model fallback
+- Fallback config: `agents.defaults.model: { primary: "google/gemini-2.5-flash", fallbacks: ["routeway/gpt-5-mini", "openrouter/..."] }`
+- auth-profiles.json: `{ version: 1, profiles: { "google:default": { type: "api_key", provider: "google", key: "..." } } }` — `key` NOT `apiKey` (changed in 2026.2.19)
+- Multiple profiles per provider → round-robin rotation with session stickiness
+- Routeway: 60+ models, 15+ providers, OpenAI-compatible aggregator, no published SLA, 100% uptime last 30 days
+- OpenRouter: same aggregator model but with explicit cross-provider failover; natively supported in OpenClaw as `openrouter/` prefix
+- Fly restart policy: use `always` not `on-failure` for agent machines (catches clean exits)
+- Stale sessions on volume: after model change, old sessions cache old model — clear sessions.json in entrypoint on model change
+- LiteLLM as platform gateway: 4 vCPU / 8GB min; too heavy per-agent but good as shared platform service
+
 ## OpenClaw Docker Gateway (2026-02-20)
 See `openclaw-docker-gateway.md` for full details. Key facts:
 - Official image: `ghcr.io/openclaw/openclaw:2026.2.19` (GHCR only, no Docker Hub)

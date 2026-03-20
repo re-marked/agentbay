@@ -10,7 +10,13 @@
     ],
     "defaults": {
       "model": {
-        "primary": "google/gemini-2.5-flash"
+        "primary": "routeway/claude-sonnet-4-6"
+      },
+      "models": {
+        "routeway/claude-sonnet-4-6": {
+          "alias": "Sonnet 4.6",
+          "params": { "transport": "sse" }
+        }
       },
       "sandbox": {
         "mode": "off"
@@ -55,17 +61,7 @@
     "ackReactionScope": "group-mentions"
   },
   "models": {
-    "mode": "merge",
-    "providers": {
-      "routeway": {
-        "baseUrl": "https://api.routeway.ai/v1",
-        "apiKey": "${ROUTEWAY_API_KEY}",
-        "api": "openai-completions",
-        "models": [
-          { "id": "minimax-m2.5", "name": "MiniMax M2.5" }
-        ]
-      }
-    }
+    "mode": "merge"
   },
   "skills": {
     "allowBundled": [],

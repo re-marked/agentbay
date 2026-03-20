@@ -511,6 +511,51 @@ export type Database = {
           },
         ]
       }
+      corporations: {
+        Row: {
+          co_founder_instance_id: string | null
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          co_founder_instance_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          co_founder_instance_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "corporations_co_founder_instance_id_fkey"
+            columns: ["co_founder_instance_id"]
+            isOneToOne: false
+            referencedRelation: "agent_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "corporations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chats: {
         Row: {
           created_at: string
@@ -899,6 +944,7 @@ export type Database = {
       }
       projects: {
         Row: {
+          corporation_id: string | null
           created_at: string
           description: string | null
           id: string
@@ -908,6 +954,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          corporation_id?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -917,6 +964,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          corporation_id?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -926,6 +974,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "projects_corporation_id_fkey"
+            columns: ["corporation_id"]
+            isOneToOne: false
+            referencedRelation: "corporations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "projects_master_member_id_fkey"
             columns: ["master_member_id"]

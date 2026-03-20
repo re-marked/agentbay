@@ -16,8 +16,8 @@ export default function GlobalError({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: 'hsl(30, 3%, 10%)',
-          color: 'hsl(40, 10%, 95%)',
+          backgroundColor: 'oklch(21.62% 0.0019 67.72)',
+          color: 'oklch(96.34% 0.0024 84.56)',
           fontFamily: 'system-ui, -apple-system, sans-serif',
         }}
       >
@@ -26,7 +26,7 @@ export default function GlobalError({
           <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>
             Something went wrong
           </h1>
-          <p style={{ color: 'hsl(30, 5%, 50%)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+          <p style={{ color: 'oklch(60.19% 0.0123 67.59)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
             {error.message || 'An unexpected error occurred'}
           </p>
           <button
@@ -35,7 +35,7 @@ export default function GlobalError({
               padding: '0.5rem 1.25rem',
               borderRadius: '0.5rem',
               border: 'none',
-              backgroundColor: 'hsl(215, 90%, 58%)',
+              backgroundColor: 'oklch(62.35% 0.1857 257.79)',
               color: 'white',
               fontSize: '0.875rem',
               fontWeight: 600,

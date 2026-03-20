@@ -18,6 +18,12 @@ RUN mkdir -p /opt/openclaw-defaults/workspace /data && \
 COPY openclaw.json /opt/openclaw-defaults/openclaw.json
 COPY workspace/ /opt/openclaw-defaults/workspace/
 
+# ── Workspace CLI scripts (workspace-msg, workspace-task) ─────
+COPY bin/ /opt/openclaw-defaults/bin/
+RUN sed -i 's/\r$//' /opt/openclaw-defaults/bin/* && \
+    chmod +x /opt/openclaw-defaults/bin/* && \
+    ln -sf /opt/openclaw-defaults/bin/* /usr/local/bin/
+
 # Entrypoint: COPY + sed to strip CRLF (avoids Windows line-ending issues)
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN sed -i 's/\r$//' /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh

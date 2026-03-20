@@ -43,7 +43,7 @@ function ToolUseItem({ toolUse }: { toolUse: ToolUse }) {
         <span className="font-medium text-muted-foreground">{config.label}</span>
         {toolUse.args && (
           <span className="text-muted-foreground/70 truncate font-mono text-[11px]">
-            {toolUse.args}
+            {typeof toolUse.args === 'string' ? toolUse.args : JSON.stringify(toolUse.args)}
           </span>
         )}
         <span className="ml-auto flex items-center gap-1 shrink-0">
@@ -76,7 +76,7 @@ function ToolUseItem({ toolUse }: { toolUse: ToolUse }) {
           >
             <div className="border-t border-border/30 bg-muted/10 px-3 py-2">
               <pre className="text-[11px] text-muted-foreground/80 font-mono whitespace-pre-wrap break-words max-h-60 overflow-y-auto">
-                {toolUse.output}
+                {typeof toolUse.output === 'string' ? toolUse.output : JSON.stringify(toolUse.output, null, 2)}
               </pre>
             </div>
           </motion.div>
